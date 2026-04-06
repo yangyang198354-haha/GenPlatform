@@ -211,36 +211,41 @@ jobs:
           REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           echo "IMAGE_BASE=${{ env.REGISTRY }}/${REPO_LC}" >> $GITHUB_ENV
 
-      - name: Mirror base images to GHCR (for GFW-restricted staging server)
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Mirror base images to GHCR (multi-arch, for arm64 Pi staging server)
         run: |
-          docker pull pgvector/pgvector:pg15
-          docker tag  pgvector/pgvector:pg15 $IMAGE_BASE/pgvector:pg15
-          docker push $IMAGE_BASE/pgvector:pg15
+          docker buildx imagetools create \
+            --tag $IMAGE_BASE/pgvector:pg15 \
+            pgvector/pgvector:pg15
 
-          docker pull redis:7-alpine
-          docker tag  redis:7-alpine $IMAGE_BASE/redis:7-alpine
-          docker push $IMAGE_BASE/redis:7-alpine
+          docker buildx imagetools create \
+            --tag $IMAGE_BASE/redis:7-alpine \
+            redis:7-alpine
 
-          docker pull nginx:1.25-alpine
-          docker tag  nginx:1.25-alpine $IMAGE_BASE/nginx:1.25-alpine
-          docker push $IMAGE_BASE/nginx:1.25-alpine
+          docker buildx imagetools create \
+            --tag $IMAGE_BASE/nginx:1.25-alpine \
+            nginx:1.25-alpine
 
-      - name: Build & push backend image
+      - name: Build & push backend image (multi-arch)
         uses: docker/build-push-action@v5
         with:
           context: project_workspace/content_gen_platform/src/backend
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.IMAGE_BASE }}/backend:${{ github.sha }}
             ${{ env.IMAGE_BASE }}/backend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build & push frontend image
+      - name: Build & push frontend image (multi-arch)
         uses: docker/build-push-action@v5
         with:
           context: project_workspace/content_gen_platform/src/frontend
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.IMAGE_BASE }}/frontend:${{ github.sha }}
             ${{ env.IMAGE_BASE }}/frontend:latest
