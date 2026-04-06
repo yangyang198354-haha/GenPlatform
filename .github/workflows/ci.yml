@@ -239,8 +239,9 @@ jobs:
       - uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.STAGING_HOST }}
-          username: deploy
+          username: yangyang
           key: ${{ secrets.STAGING_SSH_KEY }}
+          port: 57279
           script: |
             set -e
             cd /opt/content-gen-platform
