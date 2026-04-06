@@ -89,7 +89,7 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { contentAPI } from '@/api'
 import { useAuthStore } from '@/stores/auth'
@@ -195,6 +195,14 @@ const confirmContent = async () => {
   await contentAPI.confirm(savedContentId.value)
   ElMessage.success('文案已确认，可以进行发布或视频生成')
 }
+
+// Fix MINOR-008: close EventSource on component unmount to prevent connection leak
+onUnmounted(() => {
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+})
 </script>
 
 <style scoped>
