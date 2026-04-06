@@ -253,6 +253,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: docker-build
     environment: staging
+    env:
+      GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GHCR_USER: ${{ github.actor }}
     steps:
       - uses: appleboy/ssh-action@v1
         with:
@@ -260,9 +263,12 @@ jobs:
           username: yangyang
           key: ${{ secrets.STAGING_SSH_KEY }}
           port: 57279
+          envs: GHCR_TOKEN,GHCR_USER
           script: |
             set -e
             cd /opt/content-gen-platform
+
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
             docker compose pull
 
