@@ -252,7 +252,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Stage 6: Deploy to Staging
+  # Stage 6: Deploy to Staging (Raspberry Pi)
   deploy-staging:
     name: Deploy to Staging
     runs-on: [self-hosted, raspberry-pi]
@@ -283,3 +283,63 @@ jobs:
             -X POST -H "Content-Type: application/json" \
             -d '{}' | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if 'non_field_errors' in d or 'email' in d else 1)"
           echo "Staging deploy OK"
+
+  # Stage 7: Deploy to Production (Aliyun ECS)
+  deploy-production:
+    name: Deploy to Production (Aliyun)
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload compose & nginx config to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          password: ${{ secrets.PROD_PASSWORD }}
+          source: "project_workspace/content_gen_platform/src/docker-compose.yml,project_workspace/content_gen_platform/src/nginx"
+          target: /opt/content-gen-platform
+          strip_components: 3
+
+      - name: Deploy on production server
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          password: ${{ secrets.PROD_PASSWORD }}
+          envs: GHCR_TOKEN,GHCR_ACTOR
+          script: |
+            set -e
+
+            # Install Docker if not present
+            if ! command -v docker &>/dev/null; then
+              curl -fsSL https://get.docker.com | sh
+              systemctl enable --now docker
+            fi
+
+            cd /opt/content-gen-platform
+
+            # Ensure .env exists
+            if [ ! -f .env ]; then
+              echo "ERROR: /opt/content-gen-platform/.env not found. Please create it from .env.example first." >&2
+              exit 1
+            fi
+
+            # Login to GHCR
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+
+            # Pull latest images & restart
+            docker compose pull
+            docker compose up -d --remove-orphans
+
+            # Smoke test
+            sleep 10
+            curl -sf http://localhost/api/v1/auth/login/ \
+              -X POST -H "Content-Type: application/json" \
+              -d '{}' | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if 'non_field_errors' in d or 'email' in d else 1)"
+            echo "Production deploy OK"
