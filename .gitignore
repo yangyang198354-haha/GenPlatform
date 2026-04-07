@@ -23,5 +23,18 @@ build/
 .DS_Store
 Thumbs.db
 
-# Claude Code
-.claude/
+# Claude Code — ignore personal data, track shared agent definitions
+.claude/cache/
+.claude/projects/
+.claude/sessions/
+.claude/telemetry/
+.claude/history.jsonl
+.claude/plans/
+.claude/backups/
+.claude/tasks/
+.claude/ide/
+.claude/shell-snapshots/
+.claude/paste-cache/
+.claude/file-history/
+.claude/downloads/
+.claude/settings.local.json
