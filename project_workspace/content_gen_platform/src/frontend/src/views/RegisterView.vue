@@ -58,7 +58,16 @@ const validateConfirm = (rule, value, callback) => {
 const rules = {
   email: [{ required: true, type: "email", message: "请输入有效邮箱", trigger: "blur" }],
   username: [{ required: true, min: 2, message: "用户名至少2位", trigger: "blur" }],
-  password: [{ required: true, min: 8, message: "密码至少8位", trigger: "blur" }],
+  password: [
+    { required: true, min: 8, message: "密码至少8位", trigger: "blur" },
+    {
+      validator: (rule, value, callback) => {
+        if (/^\d+$/.test(value)) callback(new Error("密码不能为纯数字"));
+        else callback();
+      },
+      trigger: "blur",
+    },
+  ],
   confirm: [{ validator: validateConfirm, trigger: "blur" }],
 };
 
@@ -70,12 +79,18 @@ async function handleRegister() {
       email: form.value.email,
       username: form.value.username,
       password: form.value.password,
-      password2: form.value.password,
+      password2: form.value.confirm,
     });
     ElMessage.success("注册成功，请登录");
     router.push("/login");
   } catch (e) {
-    ElMessage.error(e.response?.data?.email?.[0] || "注册失败，请重试");
+    const data = e.response?.data;
+    if (data && typeof data === "object") {
+      const messages = Object.values(data).flat().join("；");
+      ElMessage.error(messages || "注册失败，请重试");
+    } else {
+      ElMessage.error("注册失败，请重试");
+    }
   } finally {
     loading.value = false;
   }
