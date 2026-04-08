@@ -70,6 +70,7 @@ async function handleRegister() {
       email: form.value.email,
       username: form.value.username,
       password: form.value.password,
+      password2: form.value.password,
     });
     ElMessage.success("注册成功，请登录");
     router.push("/login");

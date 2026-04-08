@@ -46,7 +46,7 @@ export default api;
 // ── Auth API ───────────────────────────────────────────────────────────────
 export const authAPI = {
   register: (data) => api.post("/auth/register/", data),
-  login: (email, password) => api.post("/auth/login/", { email, password }),
+  login: ({ email, password }) => api.post("/auth/login/", { email, password }),
   refreshToken: (refresh) => api.post("/auth/token/refresh/", { refresh }),
   getProfile: () => api.get("/auth/profile/"),
 };
