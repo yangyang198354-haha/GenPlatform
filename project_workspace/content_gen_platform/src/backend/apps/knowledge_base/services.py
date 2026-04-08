@@ -1,23 +1,26 @@
 """Knowledge base processing: chunking, embedding, and RAG retrieval."""
 import logging
 from pathlib import Path
-from typing import List
+from typing import TYPE_CHECKING, List
 
 from django.conf import settings
-from sentence_transformers import SentenceTransformer
 from pgvector.django import L2Distance
 
 from .models import Document, DocumentChunk
 
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
+
 logger = logging.getLogger(__name__)
 
 # Lazy-loaded singleton embedding model
-_embedding_model: SentenceTransformer | None = None
+_embedding_model: "SentenceTransformer | None" = None
 
 
-def _get_embedding_model() -> SentenceTransformer:
+def _get_embedding_model() -> "SentenceTransformer":
     global _embedding_model
     if _embedding_model is None:
+        from sentence_transformers import SentenceTransformer  # noqa: PLC0415
         logger.info("Loading embedding model: %s", settings.EMBEDDING_MODEL)
         _embedding_model = SentenceTransformer(
             settings.EMBEDDING_MODEL, device=settings.EMBEDDING_DEVICE
