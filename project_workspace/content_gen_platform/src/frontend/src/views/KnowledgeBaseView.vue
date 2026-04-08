@@ -50,12 +50,9 @@
       <el-upload
         ref="uploadRef"
         drag
-        :action="uploadUrl"
-        :headers="uploadHeaders"
-        :data="{ title: uploadTitle }"
+        :http-request="customUpload"
         :before-upload="beforeUpload"
-        :on-success="onUploadSuccess"
-        :on-error="onUploadError"
+        :show-file-list="false"
         accept=".pdf,.docx,.txt,.md"
       >
         <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
@@ -82,9 +79,6 @@ const loading = ref(false);
 const showUploadDialog = ref(false);
 const searchQuery = ref("");
 const uploadTitle = ref("");
-
-const uploadUrl = "/api/v1/knowledge-base/documents/";
-const uploadHeaders = { Authorization: `Bearer ${authStore.accessToken}` };
 
 onMounted(fetchDocuments);
 
@@ -117,15 +111,20 @@ function beforeUpload(file) {
   return true;
 }
 
-function onUploadSuccess() {
-  ElMessage.success("上传成功，正在处理…");
-  showUploadDialog.value = false;
-  uploadTitle.value = "";
-  fetchDocuments();
-}
-
-function onUploadError() {
-  ElMessage.error("上传失败，请重试");
+async function customUpload({ file }) {
+  const formData = new FormData();
+  formData.append("file", file);
+  if (uploadTitle.value) formData.append("name", uploadTitle.value);
+  try {
+    await kbAPI.upload(formData);
+    ElMessage.success("上传成功，正在处理…");
+    showUploadDialog.value = false;
+    uploadTitle.value = "";
+    fetchDocuments();
+  } catch (err) {
+    const msg = err.response?.data?.error || "上传失败，请重试";
+    ElMessage.error(msg);
+  }
 }
 
 async function deleteDoc(id) {

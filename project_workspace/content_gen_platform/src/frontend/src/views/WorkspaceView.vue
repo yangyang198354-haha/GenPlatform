@@ -182,9 +182,9 @@ const isDirty        = ref(false)
 const platformLabel = computed(() => platforms.find(p => p.value === form.platform)?.label || '')
 const styleLabel    = computed(() => styles.find(s => s.value === form.style)?.label || '')
 
-let eventSource = null
+let abortController = null
 
-const startGeneration = () => {
+const startGeneration = async () => {
   if (!form.prompt) return
   generatedText.value  = ''
   savedContentId.value = null
@@ -196,31 +196,56 @@ const startGeneration = () => {
     ...(form.wordLimit ? { word_limit: form.wordLimit } : {}),
   })
 
-  eventSource = new EventSource(
-    `/api/v1/llm/generate/?${params}`,
-    { headers: { Authorization: `Bearer ${auth.accessToken}` } }
-  )
-  eventSource.onmessage = (e) => {
-    const data = JSON.parse(e.data)
-    if (data.done) {
-      generating.value = false
-      eventSource.close()
-      autoSaveDraft()
-    } else {
-      generatedText.value += data.token
+  abortController = new AbortController()
+
+  try {
+    const response = await fetch(`/api/v1/llm/generate/?${params}`, {
+      headers: { Authorization: `Bearer ${auth.accessToken}` },
+      signal: abortController.signal,
+    })
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(err.error || `请求失败 (${response.status})`)
     }
-  }
-  eventSource.onerror = () => {
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop()   // keep the last (possibly incomplete) line
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const data = JSON.parse(line.slice(6))
+        if (data.done) {
+          generating.value = false
+          autoSaveDraft()
+        } else {
+          generatedText.value += data.token
+        }
+      }
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') return   // user pressed stop — handled in stopGeneration
     generating.value = false
-    eventSource.close()
-    ElMessage.error('生成中断，已保存部分内容')
+    ElMessage.error(e.message || '生成失败，请重试')
     if (generatedText.value) autoSaveDraft()
+  } finally {
+    abortController = null
   }
 }
 
 const stopGeneration = () => {
-  if (eventSource) {
-    eventSource.close()
+  if (abortController) {
+    abortController.abort()
+    abortController = null
     generating.value = false
     if (generatedText.value) autoSaveDraft()
   }
@@ -259,7 +284,7 @@ const confirmContent = async () => {
   ElMessage.success('文案已确认，可进行发布或生成视频')
 }
 
-onUnmounted(() => { if (eventSource) { eventSource.close(); eventSource = null } })
+onUnmounted(() => { if (abortController) { abortController.abort(); abortController = null } })
 </script>
 
 <style scoped>
