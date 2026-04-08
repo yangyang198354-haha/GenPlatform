@@ -1,0 +1,349 @@
+/* ============================================================
+   全局设计系统 — 内容生成平台
+   参考：Linear / Vercel / Notion 风格
+   ============================================================ */
+
+/* ── 设计 Token ── */
+:root {
+  /* Brand */
+  --brand-primary: #6366f1;
+  --brand-primary-dark: #4f46e5;
+  --brand-primary-light: #818cf8;
+  --brand-accent: #8b5cf6;
+  --brand-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+  --brand-gradient-hover: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  --brand-glow: 0 0 20px rgba(99, 102, 241, 0.35);
+
+  /* Surfaces */
+  --surface-base: #f0f4fa;
+  --surface-card: #ffffff;
+  --surface-card-hover: #fafbff;
+  --surface-overlay: rgba(255, 255, 255, 0.85);
+
+  /* Sidebar */
+  --sidebar-bg: #0c0c0f;
+  --sidebar-bg-2: #111115;
+  --sidebar-border: rgba(255, 255, 255, 0.055);
+  --sidebar-text: #94a3b8;
+  --sidebar-text-hover: #e2e8f0;
+  --sidebar-text-active: #ffffff;
+  --sidebar-item-hover: rgba(99, 102, 241, 0.1);
+  --sidebar-item-active: rgba(99, 102, 241, 0.18);
+  --sidebar-active-bar: var(--brand-primary);
+
+  /* Text */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --text-inverse: #ffffff;
+
+  /* Border */
+  --border: #e2e8f0;
+  --border-light: #f1f5f9;
+  --border-focus: var(--brand-primary);
+
+  /* Radius */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* Shadow */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.07), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.1), 0 4px 8px rgba(0, 0, 0, 0.06);
+  --shadow-xl: 0 24px 48px rgba(0, 0, 0, 0.12), 0 8px 16px rgba(0, 0, 0, 0.07);
+  --shadow-brand: 0 4px 16px rgba(99, 102, 241, 0.3);
+
+  /* Transition */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Element Plus 覆盖 */
+  --el-color-primary: #6366f1;
+  --el-color-primary-dark-2: #4f46e5;
+  --el-color-primary-light-3: #a5b4fc;
+  --el-color-primary-light-5: #c7d2fe;
+  --el-color-primary-light-7: #e0e7ff;
+  --el-color-primary-light-8: #eef2ff;
+  --el-color-primary-light-9: #f5f3ff;
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+  --el-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --el-font-size-base: 14px;
+  --el-box-shadow: var(--shadow);
+  --el-box-shadow-light: var(--shadow-sm);
+}
+
+/* ── 全局基础 ── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--surface-base);
+  margin: 0;
+  padding: 0;
+}
+
+/* ── 滚动条美化 ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* ── Keyframes ── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+  50%       { box-shadow: 0 0 0 6px rgba(99, 102, 241, 0.15); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-10px); }
+}
+@keyframes orb-drift {
+  0%   { transform: translate(0, 0) scale(1); }
+  33%  { transform: translate(30px, -20px) scale(1.05); }
+  66%  { transform: translate(-20px, 15px) scale(0.95); }
+  100% { transform: translate(0, 0) scale(1); }
+}
+
+/* ── 页面路由过渡 ── */
+.page-enter-active {
+  animation: fadeInUp var(--transition) forwards;
+}
+.page-leave-active {
+  animation: fadeIn var(--transition-fast) reverse forwards;
+}
+
+/* ============================================================
+   Element Plus 全局覆盖
+   ============================================================ */
+
+/* ── Button ── */
+.el-button {
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  border-radius: var(--radius-sm) !important;
+  transition: all var(--transition-fast) !important;
+}
+.el-button--primary {
+  background: var(--brand-gradient) !important;
+  border-color: transparent !important;
+  box-shadow: var(--shadow-brand) !important;
+}
+.el-button--primary:hover {
+  background: var(--brand-gradient-hover) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4) !important;
+}
+.el-button--primary:active { transform: translateY(0) scale(0.98); }
+.el-button--default:hover {
+  border-color: var(--brand-primary) !important;
+  color: var(--brand-primary) !important;
+  background: var(--el-color-primary-light-9) !important;
+}
+.el-button--success {
+  background: linear-gradient(135deg, #10b981, #059669) !important;
+  border-color: transparent !important;
+}
+.el-button--success:hover {
+  background: linear-gradient(135deg, #059669, #047857) !important;
+  transform: translateY(-1px);
+}
+
+/* ── Card ── */
+.el-card {
+  border: 1px solid var(--border-light) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-sm) !important;
+  transition: box-shadow var(--transition), transform var(--transition) !important;
+  background: var(--surface-card) !important;
+}
+.el-card:hover {
+  box-shadow: var(--shadow) !important;
+}
+.el-card__header {
+  padding: 16px 20px !important;
+  border-bottom: 1px solid var(--border-light) !important;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.el-card__body { padding: 20px !important; }
+
+/* ── Input ── */
+.el-input__wrapper {
+  border-radius: var(--radius-sm) !important;
+  box-shadow: 0 0 0 1px var(--border) !important;
+  transition: box-shadow var(--transition-fast) !important;
+}
+.el-input__wrapper:hover {
+  box-shadow: 0 0 0 1px #94a3b8 !important;
+}
+.el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 2px var(--brand-primary) !important;
+}
+.el-textarea__inner {
+  border-radius: var(--radius-sm) !important;
+  border-color: var(--border) !important;
+  font-family: 'Inter', sans-serif !important;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast) !important;
+}
+.el-textarea__inner:focus {
+  border-color: var(--brand-primary) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12) !important;
+}
+.el-input__inner { font-family: 'Inter', sans-serif !important; }
+
+/* ── Select ── */
+.el-select .el-input__wrapper { cursor: pointer; }
+
+/* ── Form Label ── */
+.el-form-item__label {
+  font-weight: 500 !important;
+  color: var(--text-secondary) !important;
+  font-size: 13px !important;
+}
+
+/* ── Table ── */
+.el-table {
+  border-radius: var(--radius-lg) !important;
+  overflow: hidden;
+  border: 1px solid var(--border-light) !important;
+}
+.el-table th.el-table__cell {
+  background: #f8fafc !important;
+  color: var(--text-secondary) !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.el-table tr { transition: background var(--transition-fast); }
+.el-table--enable-row-hover .el-table__body tr:hover > td.el-table__cell {
+  background: #f5f7ff !important;
+}
+
+/* ── Tag ── */
+.el-tag {
+  border-radius: var(--radius-full) !important;
+  font-weight: 500 !important;
+  font-size: 12px !important;
+  padding: 0 10px !important;
+}
+
+/* ── Dialog ── */
+.el-dialog {
+  border-radius: var(--radius-xl) !important;
+  box-shadow: var(--shadow-xl) !important;
+  overflow: hidden;
+}
+.el-dialog__header {
+  padding: 20px 24px 16px !important;
+  border-bottom: 1px solid var(--border-light);
+}
+.el-dialog__title { font-weight: 600 !important; font-size: 16px !important; }
+.el-dialog__body { padding: 24px !important; }
+.el-dialog__footer { padding: 16px 24px !important; border-top: 1px solid var(--border-light); }
+
+/* ── Dropdown ── */
+.el-dropdown-menu {
+  border-radius: var(--radius-lg) !important;
+  border: 1px solid var(--border-light) !important;
+  box-shadow: var(--shadow-lg) !important;
+  padding: 6px !important;
+  overflow: hidden;
+}
+.el-dropdown-menu__item {
+  border-radius: var(--radius-sm) !important;
+  margin: 2px 0;
+  font-size: 13px !important;
+  transition: background var(--transition-fast) !important;
+}
+.el-dropdown-menu__item:hover {
+  background: var(--el-color-primary-light-9) !important;
+  color: var(--brand-primary) !important;
+}
+
+/* ── Notification / Message ── */
+.el-message {
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-lg) !important;
+  border: none !important;
+  backdrop-filter: blur(12px);
+}
+
+/* ── Upload ── */
+.el-upload-dragger {
+  border-radius: var(--radius-lg) !important;
+  border-color: var(--border) !important;
+  transition: all var(--transition) !important;
+}
+.el-upload-dragger:hover {
+  border-color: var(--brand-primary) !important;
+  background: var(--el-color-primary-light-9) !important;
+}
+
+/* ── Progress ── */
+.el-progress-bar__outer { border-radius: var(--radius-full) !important; }
+.el-progress-bar__inner { border-radius: var(--radius-full) !important; }
+
+/* ── Steps ── */
+.el-step__head.is-finish { color: var(--brand-primary) !important; border-color: var(--brand-primary) !important; }
+.el-step__head.is-process { color: var(--brand-primary) !important; border-color: var(--brand-primary) !important; }
+
+/* ── Empty ── */
+.el-empty__description { color: var(--text-muted) !important; }
+
+/* ── Pagination ── */
+.el-pagination button,
+.el-pager li {
+  border-radius: var(--radius-sm) !important;
+  font-weight: 500 !important;
+}
+.el-pager li.is-active {
+  background: var(--brand-primary) !important;
+  border-radius: var(--radius-sm) !important;
+}
+
+/* ── Skeleton ── */
+.el-skeleton__item { border-radius: var(--radius-sm) !important; }
+
+/* ── Menu active indicator ── */
+.el-menu-item.is-active { position: relative; }
