@@ -286,6 +286,7 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           password: ${{ secrets.PROD_PASSWORD }}
           envs: GHCR_TOKEN,GHCR_ACTOR
+          command_timeout: 30m
           script: |
             set -e
 
@@ -335,10 +336,11 @@ jobs:
             done
 
             # Wait for gunicorn to be ready (migrate runs before gunicorn starts)
-            # 502 = nginx up but gunicorn not ready yet (keep waiting)
+            # 502 = nginx up but gunicorn not yet ready (keep waiting)
             # 200/400/401/422 = gunicorn is serving requests
+            # Up to 60 x 5s = 5 minutes (first deploy migrate can take ~2 min)
             echo "Waiting for gunicorn to be ready..."
-            for i in $(seq 1 36); do
+            for i in $(seq 1 60); do
               HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
                 -X POST -H "Content-Type: application/json" -d '{}' \
                 http://localhost/api/v1/auth/login/ 2>/dev/null || echo "000")
@@ -351,8 +353,8 @@ jobs:
                   # 502: nginx up, gunicorn not yet ready; 000: nginx not yet up
                   ;;
               esac
-              if [ "$i" = "36" ]; then
-                echo "ERROR: gunicorn not ready after 180s (last HTTP: $HTTP_CODE). Logs:"
+              if [ "$i" = "60" ]; then
+                echo "ERROR: gunicorn not ready after 300s (last HTTP: $HTTP_CODE). Logs:"
                 docker compose logs --tail=100 backend
                 exit 1
               fi
