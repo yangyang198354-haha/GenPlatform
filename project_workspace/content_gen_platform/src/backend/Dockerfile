@@ -9,9 +9,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install Python dependencies
+ARG TARGETPLATFORM
+
+# Install CPU-only PyTorch to avoid CUDA bloat on amd64 (~200 MB vs 2 GB).
+# arm64/aarch64 wheels on PyPI are always CPU-only — no special handling needed.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
+      pip install --no-cache-dir \
+        "torch==2.3.1+cpu" "sentence-transformers==3.0.1" \
+        --index-url https://download.pytorch.org/whl/cpu \
+        --extra-index-url https://pypi.org/simple; \
+    else \
+      pip install --no-cache-dir "torch==2.3.1" "sentence-transformers==3.0.1"; \
+    fi
+
+# Install remaining dependencies (torch already present, pip skips reinstall)
+RUN grep -Ev "^(torch|sentence-transformers)==" requirements.txt | \
+    pip install --no-cache-dir -r /dev/stdin
 
 # Copy project
 COPY . .

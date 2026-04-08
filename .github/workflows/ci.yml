@@ -345,6 +345,11 @@ jobs:
             docker compose pull
             docker compose up -d --remove-orphans
 
+            # Run DB migrations (mirrors deploy-staging step)
+            sleep 15
+            docker compose exec -T backend python manage.py migrate --check || \
+            docker compose exec -T backend python manage.py migrate
+
             # Smoke test
             sleep 10
             curl -sf http://localhost/api/v1/auth/login/ \
