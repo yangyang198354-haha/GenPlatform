@@ -263,10 +263,24 @@ jobs:
     runs-on: ubuntu-latest
     needs: docker-build
     environment: staging
+    # Skip this job gracefully when SSH secrets are not yet configured.
+    # To enable: add STAGING_HOST, STAGING_USER, STAGING_PASSWORD as repo secrets.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check staging secrets are configured
+        id: check-secrets
+        run: |
+          if [ -z "${{ secrets.STAGING_HOST }}" ]; then
+            echo "SKIPPED=true" >> $GITHUB_OUTPUT
+            echo "::warning::deploy-staging skipped: STAGING_HOST secret is not set. Configure STAGING_HOST, STAGING_USER, STAGING_PASSWORD in repo Settings > Secrets."
+          else
+            echo "SKIPPED=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Upload compose & nginx config to staging server
+        if: steps.check-secrets.outputs.SKIPPED == 'false'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.STAGING_HOST }}
@@ -277,6 +291,7 @@ jobs:
           strip_components: 3
 
       - name: Deploy on staging server
+        if: steps.check-secrets.outputs.SKIPPED == 'false'
         uses: appleboy/ssh-action@v1.0.3
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -328,10 +343,24 @@ jobs:
     runs-on: ubuntu-latest
     needs: deploy-staging
     environment: production
+    # Skip this job gracefully when SSH secrets are not yet configured.
+    # To enable: add PROD_HOST, PROD_USER, PROD_PASSWORD as repo secrets.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check production secrets are configured
+        id: check-secrets
+        run: |
+          if [ -z "${{ secrets.PROD_HOST }}" ]; then
+            echo "SKIPPED=true" >> $GITHUB_OUTPUT
+            echo "::warning::deploy-production skipped: PROD_HOST secret is not set. Configure PROD_HOST, PROD_USER, PROD_PASSWORD in repo Settings > Secrets."
+          else
+            echo "SKIPPED=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Upload compose & nginx config to server
+        if: steps.check-secrets.outputs.SKIPPED == 'false'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.PROD_HOST }}
@@ -342,6 +371,7 @@ jobs:
           strip_components: 3
 
       - name: Deploy on production server
+        if: steps.check-secrets.outputs.SKIPPED == 'false'
         uses: appleboy/ssh-action@v1.0.3
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
