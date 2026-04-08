@@ -1,4 +1,6 @@
-FROM node:20-alpine AS builder
+# Pin builder to amd64: npm/node crash under QEMU arm64 emulation (SIGILL).
+# The build output (dist/) is pure JS/CSS — architecture-independent.
+FROM --platform=linux/amd64 node:20-alpine AS builder
 
 WORKDIR /app
 COPY package*.json ./
