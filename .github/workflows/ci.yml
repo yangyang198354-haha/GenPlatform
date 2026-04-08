@@ -257,11 +257,117 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Stage 6: Deploy to Production (Aliyun ECS)
+  # Stage 6: Validate production image before deploy
+  # Catches boot failures, broken migrations, and import errors in CI
+  # before they ever reach the production server.
+  validate-image:
+    name: Validate Production Image
+    runs-on: ubuntu-latest
+    needs: docker-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image names
+        run: |
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_BASE=${{ env.REGISTRY }}/${REPO_LC}" >> $GITHUB_ENV
+
+      - name: Start test database (pgvector) and Redis
+        run: |
+          docker run -d --name validate-db \
+            -p 5432:5432 \
+            -e POSTGRES_DB=validate_db \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            pgvector/pgvector:pg15
+          docker run -d --name validate-redis \
+            -p 6379:6379 \
+            redis:7-alpine
+          # Wait for postgres
+          for i in $(seq 1 20); do
+            docker exec validate-db pg_isready -U postgres && break || sleep 2
+          done
+
+      - name: Django system check (verify all apps & settings load)
+        run: |
+          docker run --rm \
+            --network host \
+            -e DJANGO_SETTINGS_MODULE=config.settings.production \
+            -e DJANGO_SECRET_KEY=ci-validate-not-for-production-xxxxxxxxxxxxx \
+            -e ENCRYPTION_KEY=dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXQ= \
+            -e POSTGRES_HOST=localhost \
+            -e POSTGRES_DB=validate_db \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e ALLOWED_HOSTS=localhost \
+            -e REDIS_URL=redis://localhost:6379/0 \
+            ${{ env.IMAGE_BASE }}/backend:${{ github.sha }} \
+            python manage.py check
+
+      - name: Verify all migrations apply cleanly
+        run: |
+          docker run --rm \
+            --network host \
+            -e DJANGO_SETTINGS_MODULE=config.settings.production \
+            -e DJANGO_SECRET_KEY=ci-validate-not-for-production-xxxxxxxxxxxxx \
+            -e ENCRYPTION_KEY=dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXQ= \
+            -e POSTGRES_HOST=localhost \
+            -e POSTGRES_DB=validate_db \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e ALLOWED_HOSTS=localhost \
+            -e REDIS_URL=redis://localhost:6379/0 \
+            ${{ env.IMAGE_BASE }}/backend:${{ github.sha }} \
+            python manage.py migrate
+
+      - name: Verify gunicorn boots and serves HTTP
+        run: |
+          docker run -d --name validate-backend \
+            --network host \
+            -e DJANGO_SETTINGS_MODULE=config.settings.production \
+            -e DJANGO_SECRET_KEY=ci-validate-not-for-production-xxxxxxxxxxxxx \
+            -e ENCRYPTION_KEY=dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXQ= \
+            -e POSTGRES_HOST=localhost \
+            -e POSTGRES_DB=validate_db \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e ALLOWED_HOSTS=localhost \
+            -e REDIS_URL=redis://localhost:6379/0 \
+            ${{ env.IMAGE_BASE }}/backend:${{ github.sha }}
+          # Wait up to 60s for gunicorn to respond
+          for i in $(seq 1 12); do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+              -X POST -H "Content-Type: application/json" -d '{}' \
+              http://localhost:8000/api/v1/auth/login/ 2>/dev/null || echo "000")
+            case "$HTTP_CODE" in
+              200|400|401|422)
+                echo "Backend ready — HTTP $HTTP_CODE"
+                exit 0
+                ;;
+            esac
+            echo "  HTTP $HTTP_CODE, waiting... ($i/12)"
+            sleep 5
+          done
+          echo "ERROR: Backend did not start within 60s. Logs:"
+          docker logs validate-backend
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f validate-backend validate-db validate-redis 2>/dev/null || true
+
+  # Stage 7: Deploy to Production (Aliyun ECS)
   deploy-production:
     name: Deploy to Production (Aliyun)
     runs-on: ubuntu-latest
-    needs: docker-build
+    needs: validate-image
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -358,7 +464,7 @@ jobs:
                 docker compose logs --tail=100 backend
                 exit 1
               fi
-              echo "  HTTP $HTTP_CODE, waiting... ($i/36)"
+              echo "  HTTP $HTTP_CODE, waiting... ($i/60)"
               sleep 5
             done
             echo "Production deploy OK"
