@@ -35,6 +35,12 @@ STYLE_PROMPTS = {
 class GenerateContentView(APIView):
     """SSE endpoint: stream LLM-generated content to the client."""
 
+    def perform_content_negotiation(self, request, force=False):
+        # SSE responses are text/event-stream — skip DRF's Accept-header
+        # negotiation so it never raises a 406 Not Acceptable.
+        renderers = self.get_renderers()
+        return (renderers[0], renderers[0].media_type)
+
     def get(self, request):
         prompt = request.query_params.get("prompt", "").strip()
         platform = request.query_params.get("platform", "general")
