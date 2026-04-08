@@ -22,7 +22,9 @@ STATIC_ROOT = "/app/staticfiles"
 MEDIA_ROOT = os.environ.get("MEDIA_ROOT", "/app/media")
 
 # CORS — tighten to real frontend origin
-CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
+CORS_ALLOWED_ORIGINS = [
+    o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
 
 # Storage backend
 STORAGE_BACKEND = os.environ.get("STORAGE_BACKEND", "local")

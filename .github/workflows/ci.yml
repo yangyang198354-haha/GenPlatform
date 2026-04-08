@@ -308,6 +308,7 @@ jobs:
             -e POSTGRES_PASSWORD=postgres \
             -e ALLOWED_HOSTS=localhost \
             -e REDIS_URL=redis://localhost:6379/0 \
+            -e CORS_ALLOWED_ORIGINS=http://localhost \
             ${{ env.IMAGE_BASE }}/backend:${{ github.sha }} \
             python manage.py check
 
@@ -324,6 +325,7 @@ jobs:
             -e POSTGRES_PASSWORD=postgres \
             -e ALLOWED_HOSTS=localhost \
             -e REDIS_URL=redis://localhost:6379/0 \
+            -e CORS_ALLOWED_ORIGINS=http://localhost \
             ${{ env.IMAGE_BASE }}/backend:${{ github.sha }} \
             python manage.py migrate
 
@@ -340,6 +342,7 @@ jobs:
             -e POSTGRES_PASSWORD=postgres \
             -e ALLOWED_HOSTS=localhost \
             -e REDIS_URL=redis://localhost:6379/0 \
+            -e CORS_ALLOWED_ORIGINS=http://localhost \
             ${{ env.IMAGE_BASE }}/backend:${{ github.sha }}
           # Wait up to 60s for gunicorn to respond
           for i in $(seq 1 12); do
