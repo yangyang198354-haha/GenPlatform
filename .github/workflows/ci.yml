@@ -219,10 +219,7 @@ jobs:
           REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           echo "IMAGE_BASE=${{ env.REGISTRY }}/${REPO_LC}" >> $GITHUB_ENV
 
-      - name: Set up QEMU (for arm64 emulation)
-        uses: docker/setup-qemu-action@v3
-
-      - name: Mirror base images to GHCR (multi-arch, for arm64 Pi staging server)
+      - name: Mirror base images to GHCR (amd64, for Aliyun ECS servers behind GFW)
         run: |
           docker buildx imagetools create \
             --tag $IMAGE_BASE/pgvector:pg15 \
@@ -236,61 +233,94 @@ jobs:
             --tag $IMAGE_BASE/nginx:1.25-alpine \
             nginx:1.25-alpine
 
-      - name: Build & push backend image (multi-arch)
+      - name: Build & push backend image (amd64)
         uses: docker/build-push-action@v5
         with:
           context: project_workspace/content_gen_platform/src/backend
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           tags: |
             ${{ env.IMAGE_BASE }}/backend:${{ github.sha }}
             ${{ env.IMAGE_BASE }}/backend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build & push frontend image (multi-arch)
+      - name: Build & push frontend image (amd64)
         uses: docker/build-push-action@v5
         with:
           context: project_workspace/content_gen_platform/src/frontend
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           tags: |
             ${{ env.IMAGE_BASE }}/frontend:${{ github.sha }}
             ${{ env.IMAGE_BASE }}/frontend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Stage 6: Deploy to Staging (Raspberry Pi)
+  # Stage 6: Deploy to Staging (Aliyun ECS)
   deploy-staging:
-    name: Deploy to Staging
-    runs-on: [self-hosted, raspberry-pi]
+    name: Deploy to Staging (Aliyun)
+    runs-on: ubuntu-latest
     needs: docker-build
     environment: staging
     steps:
-      - name: Login to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - uses: actions/checkout@v4
 
-      - name: Pull latest images
-        working-directory: /opt/content-gen-platform
-        run: docker compose pull
+      - name: Upload compose & nginx config to staging server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          password: ${{ secrets.STAGING_PASSWORD }}
+          source: "project_workspace/content_gen_platform/src/docker-compose.yml,project_workspace/content_gen_platform/src/nginx"
+          target: /opt/content-gen-platform
+          strip_components: 3
 
-      - name: Start services
-        working-directory: /opt/content-gen-platform
-        run: docker compose up -d --wait
+      - name: Deploy on staging server
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          password: ${{ secrets.STAGING_PASSWORD }}
+          envs: GHCR_TOKEN,GHCR_ACTOR
+          script: |
+            set -e
 
-      - name: Run migrations
-        working-directory: /opt/content-gen-platform
-        run: |
-          docker compose exec -T backend python manage.py migrate --check || \
-          docker compose exec -T backend python manage.py migrate
+            # Install Docker if not present
+            if ! command -v docker &>/dev/null; then
+              curl -fsSL https://get.docker.com | sh
+              systemctl enable --now docker
+            fi
 
-      - name: Smoke test
-        run: |
-          sleep 5
-          curl -sf http://localhost/api/v1/auth/login/ \
-            -X POST -H "Content-Type: application/json" \
-            -d '{}' | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if 'non_field_errors' in d or 'email' in d else 1)"
-          echo "Staging deploy OK"
+            cd /opt/content-gen-platform
+
+            # Ensure .env exists
+            if [ ! -f .env ]; then
+              echo "ERROR: /opt/content-gen-platform/.env not found. Please create it from .env.example first." >&2
+              exit 1
+            fi
+
+            # Login to GHCR
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+
+            # Pull latest images & restart
+            docker compose pull
+            docker compose up -d --remove-orphans
+
+            # Run DB migrations
+            sleep 15
+            docker compose exec -T backend python manage.py migrate --check || \
+            docker compose exec -T backend python manage.py migrate
+
+            # Smoke test
+            sleep 10
+            curl -sf http://localhost/api/v1/auth/login/ \
+              -X POST -H "Content-Type: application/json" \
+              -d '{}' | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if 'non_field_errors' in d or 'email' in d else 1)"
+            echo "Staging deploy OK"
 
   # Stage 7: Deploy to Production (Aliyun ECS)
   deploy-production:
