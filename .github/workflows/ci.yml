@@ -310,13 +310,26 @@ jobs:
             docker compose pull
             docker compose up -d --remove-orphans
 
-            # Run DB migrations
-            sleep 15
-            docker compose exec -T backend python manage.py migrate --check || \
-            docker compose exec -T backend python manage.py migrate
+            # Migrations run inside the backend startup command (migrate → gunicorn).
+            # Poll for up to 2 minutes; print logs and fail if backend never starts.
+            echo "Waiting for backend to start (runs DB migrations on startup)..."
+            for i in $(seq 1 24); do
+              CONTAINER_ID=$(docker compose ps -q backend 2>/dev/null || true)
+              if [ -n "$CONTAINER_ID" ] && \
+                 [ "$(docker inspect --format='{{.State.Status}}' "$CONTAINER_ID" 2>/dev/null)" = "running" ]; then
+                echo "Backend is running (${i}×5s elapsed)"
+                break
+              fi
+              if [ "$i" = "24" ]; then
+                echo "ERROR: backend did not start within 120s. Container logs:"
+                docker compose logs --tail=100 backend
+                exit 1
+              fi
+              echo "  not yet running... ($i/24)"
+              sleep 5
+            done
 
-            # Smoke test
-            sleep 10
+            # Smoke test — empty POST to login returns 400 with validation error keys
             curl -sf http://localhost/api/v1/auth/login/ \
               -X POST -H "Content-Type: application/json" \
               -d '{}' | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if 'non_field_errors' in d or 'email' in d else 1)"
