@@ -303,16 +303,9 @@ jobs:
             if [ ! -f .env ]; then
               echo "INFO: .env not found, generating secure defaults for first deploy..."
               SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(50))")
-              ENCRYPTION_KEY=$(python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
-              cat > .env <<EOF
-DJANGO_SECRET_KEY=${SECRET_KEY}
-ENCRYPTION_KEY=${ENCRYPTION_KEY}
-POSTGRES_PASSWORD=postgres
-POSTGRES_DB=content_gen_platform
-ALLOWED_HOSTS=localhost,127.0.0.1,${HOSTNAME}
-CORS_ALLOWED_ORIGINS=http://localhost
-STORAGE_BACKEND=local
-EOF
+              ENCRYPTION_KEY=$(python3 -c "import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
+              printf 'DJANGO_SECRET_KEY=%s\nENCRYPTION_KEY=%s\nPOSTGRES_PASSWORD=postgres\nPOSTGRES_DB=content_gen_platform\nALLOWED_HOSTS=localhost,127.0.0.1,%s\nCORS_ALLOWED_ORIGINS=http://localhost\nSTORAGE_BACKEND=local\n' \
+                "$SECRET_KEY" "$ENCRYPTION_KEY" "$HOSTNAME" > .env
               echo "INFO: .env created. Update ALLOWED_HOSTS and CORS_ALLOWED_ORIGINS with your domain."
             fi
 
