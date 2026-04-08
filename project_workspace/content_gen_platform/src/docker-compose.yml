@@ -62,8 +62,12 @@ services:
       POSTGRES_HOST: db
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       REDIS_URL: redis://redis:6379/0
+      # HuggingFace mirror for servers behind GFW (model download on first use)
+      HF_ENDPOINT: https://hf-mirror.com
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
     volumes:
       - media_data:/app/media
+      - model_cache:/root/.cache/huggingface
     depends_on:
       - backend
     command: celery -A config worker -l info -Q default,video,publish -c 2
@@ -101,3 +105,4 @@ services:
 volumes:
   pgdata:
   media_data:
+  model_cache:

@@ -46,7 +46,13 @@ def _extract_text(file_path: str, file_type: str) -> str:
         try:
             import docx
             doc = docx.Document(str(path))
-            return "\n".join(p.text for p in doc.paragraphs)
+            texts = [p.text for p in doc.paragraphs if p.text.strip()]
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        if cell.text.strip():
+                            texts.append(cell.text)
+            return "\n".join(texts)
         except Exception as e:
             raise RuntimeError(f"DOCX extraction failed: {e}") from e
 
