@@ -328,6 +328,28 @@ body {
 .el-step__head.is-finish { color: var(--brand-primary) !important; border-color: var(--brand-primary) !important; }
 .el-step__head.is-process { color: var(--brand-primary) !important; border-color: var(--brand-primary) !important; }
 
+/* ── Icon 尺寸归一化 ── */
+/* 防止 el-icon 从大号父级（h1/h2/h3）继承字号导致图标异常巨大 */
+.el-icon {
+  font-size: 16px;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.15em;
+}
+/* 按钮内图标跟随按钮字号 */
+.el-button .el-icon  { font-size: inherit; }
+/* 小尺寸按钮内图标 */
+.el-button--small .el-icon { font-size: 12px; }
+/* 表格操作区图标保持 14px */
+.el-table .el-icon  { font-size: 14px; }
+/* Tag 内图标 */
+.el-tag .el-icon    { font-size: 12px; }
+/* Input 前后缀图标 */
+.el-input__prefix .el-icon,
+.el-input__suffix .el-icon { font-size: 14px; }
+/* 表单 label 图标 */
+.el-form-item__label .el-icon { font-size: 14px; }
+
 /* ── Empty ── */
 .el-empty__description { color: var(--text-muted) !important; }
 

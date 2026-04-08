@@ -22,9 +22,7 @@
           class="nav-item"
           :class="{ active: activeMenu === item.path }"
         >
-          <span class="nav-icon">
-            <component :is="item.icon" />
-          </span>
+          <el-icon class="nav-icon"><component :is="item.icon" /></el-icon>
           <span class="nav-label">{{ item.label }}</span>
           <span v-if="activeMenu === item.path" class="nav-active-dot" />
         </router-link>
@@ -248,12 +246,9 @@ async function handleLogout() {
 .nav-item.active .nav-icon { color: var(--brand-primary-light); }
 
 .nav-icon {
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
+  font-size: 16px !important;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
   transition: color var(--transition-fast);
 }
