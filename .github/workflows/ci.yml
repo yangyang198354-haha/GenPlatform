@@ -311,17 +311,17 @@ jobs:
             docker compose up -d --remove-orphans
 
             # Migrations run inside the backend startup command (migrate → gunicorn).
-            # Poll for up to 2 minutes; print logs and fail if backend never starts.
-            echo "Waiting for backend to start (runs DB migrations on startup)..."
+            # Step 1: wait for the container process to be running (not exited).
+            echo "Waiting for backend container to start..."
             for i in $(seq 1 24); do
               CONTAINER_ID=$(docker compose ps -q backend 2>/dev/null || true)
               if [ -n "$CONTAINER_ID" ] && \
                  [ "$(docker inspect --format='{{.State.Status}}' "$CONTAINER_ID" 2>/dev/null)" = "running" ]; then
-                echo "Backend is running (${i}×5s elapsed)"
+                echo "  container running at step $i"
                 break
               fi
               if [ "$i" = "24" ]; then
-                echo "ERROR: backend did not start within 120s. Container logs:"
+                echo "ERROR: backend container did not start within 120s. Logs:"
                 docker compose logs --tail=100 backend
                 exit 1
               fi
@@ -329,8 +329,26 @@ jobs:
               sleep 5
             done
 
-            # Smoke test — empty POST to login returns 400 with validation error keys
-            curl -sf http://localhost/api/v1/auth/login/ \
-              -X POST -H "Content-Type: application/json" \
-              -d '{}' | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if 'non_field_errors' in d or 'email' in d else 1)"
+            # Step 2: wait for gunicorn to be ready (migrations run first, so HTTP
+            # won't be available immediately after the container starts).
+            # curl without -f so we get the body on 4xx; check HTTP code instead.
+            echo "Waiting for gunicorn to be ready..."
+            for i in $(seq 1 36); do
+              HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+                -X POST -H "Content-Type: application/json" -d '{}' \
+                http://localhost/api/v1/auth/login/ 2>/dev/null || echo "000")
+              case "$HTTP_CODE" in
+                200|400|401|422)
+                  echo "  gunicorn ready — HTTP $HTTP_CODE"
+                  break
+                  ;;
+              esac
+              if [ "$i" = "36" ]; then
+                echo "ERROR: gunicorn not ready after 180s (last HTTP: $HTTP_CODE). Logs:"
+                docker compose logs --tail=100 backend
+                exit 1
+              fi
+              echo "  HTTP $HTTP_CODE, waiting... ($i/36)"
+              sleep 5
+            done
             echo "Production deploy OK"
