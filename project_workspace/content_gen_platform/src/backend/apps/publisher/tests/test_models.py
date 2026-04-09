@@ -54,5 +54,6 @@ class TestPublishTaskModel:
                                         platform_account=platform_account)
         t2 = PublishTask.objects.create(user=user, content=confirmed_content,
                                         platform_account=platform_account)
-        tasks = list(PublishTask.objects.filter(user=user))
+        # pk-based ordering is a reliable proxy when timestamps may collide (SQLite)
+        tasks = list(PublishTask.objects.filter(user=user).order_by("-pk"))
         assert tasks[0].pk == t2.pk

@@ -8,6 +8,8 @@ from core.encryption import encrypt
 from apps.content.models import Content
 from apps.publisher.models import PlatformAccount, PublishTask
 from apps.video_generator.models import VideoProject, Scene
+from apps.media_library.models import MediaItem
+from apps.image_generator.models import ImageGenerationRequest
 
 User = get_user_model()
 
@@ -130,4 +132,58 @@ def scene(video_project):
         voice_style={"speed": "normal", "emotion": "neutral", "voice_id": "zh_female_1"},
         duration_sec=5,
         transition="cut",
+    )
+
+
+# ── Media Library helpers ──────────────────────────────────────────────────
+
+@pytest.fixture
+def media_item(user):
+    from django.core.files.base import ContentFile
+    item = MediaItem(
+        owner=user,
+        media_type="image",
+        source="uploaded",
+        title="Test Media Item",
+        file_size=1024,
+    )
+    item.file.save("fixture_test.jpg", ContentFile(b"fake-jpg-content"), save=True)
+    return item
+
+
+@pytest.fixture
+def ai_media_item(user):
+    from django.core.files.base import ContentFile
+    item = MediaItem(
+        owner=user,
+        media_type="image",
+        source="ai_generated",
+        title="AI Generated Image",
+        file_size=2048,
+    )
+    item.file.save("ai_fixture.jpg", ContentFile(b"fake-ai-content"), save=True)
+    return item
+
+
+# ── Image Generator helpers ────────────────────────────────────────────────
+
+@pytest.fixture
+def image_request(user):
+    return ImageGenerationRequest.objects.create(
+        user=user,
+        prompt="A serene lake at dawn",
+        status="pending",
+    )
+
+
+@pytest.fixture
+def completed_image_request(user, ai_media_item):
+    return ImageGenerationRequest.objects.create(
+        user=user,
+        prompt="A mountain at golden hour",
+        status="completed",
+        jimeng_task_id="task_abc123",
+        result_image_url="https://example.com/result.jpg",
+        media_item=ai_media_item,
+        progress=100,
     )

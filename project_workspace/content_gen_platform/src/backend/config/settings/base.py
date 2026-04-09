@@ -40,6 +40,8 @@ LOCAL_APPS = [
     "apps.video_generator",
     "apps.notifications",
     "apps.settings_vault",
+    "apps.media_library",
+    "apps.image_generator",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

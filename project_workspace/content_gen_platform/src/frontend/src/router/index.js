@@ -56,6 +56,16 @@ const routes = [
         component: () => import("@/views/VideoDetailView.vue"),
       },
       {
+        path: "image-generator",
+        name: "ImageGenerator",
+        component: () => import("@/views/ImageGeneratorView.vue"),
+      },
+      {
+        path: "media-library",
+        name: "MediaLibrary",
+        component: () => import("@/views/MediaLibraryView.vue"),
+      },
+      {
         path: "settings",
         name: "Settings",
         component: () => import("@/views/SettingsView.vue"),

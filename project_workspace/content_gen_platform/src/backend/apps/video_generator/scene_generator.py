@@ -53,7 +53,7 @@ def generate_scenes_from_content(content: Content, user_id: int) -> List[dict]:
         api_key = config.get("api_key", "")
         service_type = llm_cfg.service_type
 
-        prompt = SCENE_GENERATION_PROMPT.format(content_body=content.body)
+        prompt = SCENE_GENERATION_PROMPT.replace("{content_body}", content.body)
 
         if service_type == "llm_deepseek":
             base_url = "https://api.deepseek.com/v1"

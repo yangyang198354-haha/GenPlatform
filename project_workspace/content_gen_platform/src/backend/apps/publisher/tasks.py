@@ -5,6 +5,9 @@ from django.utils import timezone
 from celery import shared_task
 
 from core.encryption import decrypt
+from .models import PublishTask
+from .publishers import get_publisher
+from apps.notifications.service import push_notification
 
 logger = logging.getLogger(__name__)
 
@@ -12,9 +15,6 @@ logger = logging.getLogger(__name__)
 @shared_task(bind=True, max_retries=2, default_retry_delay=60)
 def execute_publish_task(self, task_id: int) -> None:
     """Execute a single publish task: call platform API and update status."""
-    from .models import PublishTask
-    from .publishers import get_publisher
-
     try:
         task = PublishTask.objects.select_related("content", "platform_account").get(pk=task_id)
     except PublishTask.DoesNotExist:
@@ -52,7 +52,6 @@ def execute_publish_task(self, task_id: int) -> None:
         ])
 
         # Push WebSocket notification
-        from apps.notifications.service import push_notification
         asyncio.run(push_notification(
             user_id=task.user_id,
             event_type="publish_status",

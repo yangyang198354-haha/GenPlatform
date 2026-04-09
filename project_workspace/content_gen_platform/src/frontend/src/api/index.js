@@ -104,3 +104,24 @@ export const settingsAPI = {
   test: (serviceType) => api.post(`/settings/services/${serviceType}/test/`),
   list: () => api.get("/settings/services/"),
 };
+
+// ── Image Generator API ────────────────────────────────────────────────────
+export const imageAPI = {
+  generate: (formData) =>
+    api.post("/image/generate/", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+  getStatus: (id) => api.get(`/image/generate/${id}/status/`),
+  getHistory: () => api.get("/image/history/"),
+};
+
+// ── Media Library API ──────────────────────────────────────────────────────
+export const mediaAPI = {
+  list: (params) => api.get("/media/", { params }),
+  upload: (formData) =>
+    api.post("/media/upload/", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
+  delete: (id) => api.delete(`/media/${id}/`),
+  download: (id) => api.get(`/media/${id}/download/`),
+};

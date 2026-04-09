@@ -100,7 +100,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useNotificationStore } from "@/stores/notification";
 import {
   Document, Edit, List, VideoCamera, Setting,
-  ArrowDown, SwitchButton, Bell,
+  ArrowDown, SwitchButton, Bell, PictureFilled, Files,
 } from "@element-plus/icons-vue";
 
 const route   = useRoute();
@@ -109,21 +109,25 @@ const authStore = useAuthStore();
 const notifStore = useNotificationStore();
 
 const navItems = [
-  { path: "/knowledge-base", label: "知识库",   icon: Document    },
-  { path: "/workspace",      label: "内容生成", icon: Edit        },
-  { path: "/contents",       label: "内容列表", icon: List        },
-  { path: "/videos",         label: "视频项目", icon: VideoCamera },
-  { path: "/publish",        label: "发布管理", icon: Bell        },
-  { path: "/settings",       label: "系统设置", icon: Setting     },
+  { path: "/knowledge-base",  label: "知识库",    icon: Document      },
+  { path: "/workspace",       label: "内容生成",  icon: Edit          },
+  { path: "/contents",        label: "内容列表",  icon: List          },
+  { path: "/image-generator", label: "AI 图片",   icon: PictureFilled },
+  { path: "/media-library",   label: "素材库",    icon: Files         },
+  { path: "/videos",          label: "视频项目",  icon: VideoCamera   },
+  { path: "/publish",         label: "发布管理",  icon: Bell          },
+  { path: "/settings",        label: "系统设置",  icon: Setting       },
 ];
 
 const pageTitles = {
-  "/knowledge-base": "知识库",
-  "/workspace":      "内容生成工作台",
-  "/contents":       "内容列表",
-  "/videos":         "视频项目",
-  "/publish":        "发布管理",
-  "/settings":       "系统设置",
+  "/knowledge-base":  "知识库",
+  "/workspace":       "内容生成工作台",
+  "/contents":        "内容列表",
+  "/image-generator": "AI 图片生成",
+  "/media-library":   "素材库",
+  "/videos":          "视频项目",
+  "/publish":         "发布管理",
+  "/settings":        "系统设置",
 };
 
 const activeMenu      = computed(() => route.path);

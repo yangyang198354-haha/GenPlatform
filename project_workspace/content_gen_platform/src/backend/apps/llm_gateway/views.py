@@ -3,6 +3,7 @@ import json
 import logging
 import asyncio
 
+from django.conf import settings
 from django.http import StreamingHttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -10,8 +11,13 @@ from rest_framework import status
 
 from core.encryption import decrypt
 from apps.settings_vault.models import UserServiceConfig
-from apps.knowledge_base.services import search as kb_search
 from .providers import get_provider
+
+
+def _kb_search(user_id, query, top_k=3):
+    """Lazy wrapper so knowledge_base isn't imported at module load time."""
+    from apps.knowledge_base.services import search  # noqa: PLC0415
+    return search(user_id, query, top_k)
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +78,9 @@ class GenerateContentView(APIView):
         # Build context from knowledge base
         context_parts = []
         used_doc_ids = []
-        if use_kb:
+        if use_kb and "apps.knowledge_base" in settings.INSTALLED_APPS:
             try:
-                chunks = kb_search(request.user.pk, prompt, top_k=3)
+                chunks = _kb_search(request.user.pk, prompt, top_k=3)
                 for chunk in chunks:
                     context_parts.append(chunk.content)
                     if chunk.document_id not in used_doc_ids:

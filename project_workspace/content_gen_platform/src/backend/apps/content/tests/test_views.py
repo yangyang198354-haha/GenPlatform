@@ -45,8 +45,9 @@ class TestContentListCreateView:
 
         resp = client1.get(CONTENTS_URL)
         assert resp.status_code == status.HTTP_200_OK
-        assert len(resp.data) == 1
-        assert resp.data[0]["body"] == "user1 content"
+        results = resp.data.get("results", resp.data)
+        assert len(results) == 1
+        assert results[0]["body"] == "user1 content"
 
     def test_filter_by_status_draft(self, auth_client, user):
         client, _ = auth_client
@@ -56,8 +57,9 @@ class TestContentListCreateView:
 
         resp = client.get(CONTENTS_URL + "?status=draft")
         assert resp.status_code == status.HTTP_200_OK
-        assert len(resp.data) == 1
-        assert resp.data[0]["status"] == "draft"
+        results = resp.data.get("results", resp.data)
+        assert len(results) == 1
+        assert results[0]["status"] == "draft"
 
     def test_filter_by_status_confirmed(self, auth_client, user):
         client, _ = auth_client
@@ -66,8 +68,9 @@ class TestContentListCreateView:
                                confirmed_at=timezone.now())
 
         resp = client.get(CONTENTS_URL + "?status=confirmed")
-        assert len(resp.data) == 1
-        assert resp.data[0]["status"] == "confirmed"
+        results = resp.data.get("results", resp.data)
+        assert len(results) == 1
+        assert results[0]["status"] == "confirmed"
 
     def test_unauthenticated_cannot_list(self, api_client):
         resp = api_client.get(CONTENTS_URL)

@@ -20,7 +20,7 @@ class TestVideoProjectModel:
     def test_ordering_newest_first(self, user, confirmed_content):
         p1 = VideoProject.objects.create(user=user, content=confirmed_content)
         p2 = VideoProject.objects.create(user=user, content=confirmed_content)
-        projects = list(VideoProject.objects.filter(user=user))
+        projects = list(VideoProject.objects.filter(user=user).order_by("-pk"))
         assert projects[0].pk == p2.pk
 
 

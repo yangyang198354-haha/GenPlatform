@@ -95,8 +95,9 @@ class TestPlatformAccountListView:
         )
         resp = client.get(ACCOUNTS_URL)
         assert resp.status_code == status.HTTP_200_OK
-        assert len(resp.data) == 1
-        assert resp.data[0]["platform"] == "weibo"
+        results = resp.data.get("results", resp.data)
+        assert len(results) == 1
+        assert results[0]["platform"] == "weibo"
 
     def test_list_own_accounts_only(self, auth_client, auth_client2, user, user2):
         client1, _ = auth_client
@@ -109,8 +110,9 @@ class TestPlatformAccountListView:
             auth_type="api_key", encrypted_credentials=encrypt({"token": "b"}),
         )
         resp = client1.get(ACCOUNTS_URL)
-        assert len(resp.data) == 1
-        assert resp.data[0]["display_name"] == "U1"
+        results = resp.data.get("results", resp.data)
+        assert len(results) == 1
+        assert results[0]["display_name"] == "U1"
 
 
 @pytest.mark.django_db
@@ -219,7 +221,8 @@ class TestPublishTaskListCreateView:
                                    platform_account=platform_account)
         resp = client1.get(TASKS_URL)
         assert resp.status_code == status.HTTP_200_OK
-        for task_data in resp.data:
+        results = resp.data.get("results", resp.data)
+        for task_data in results:
             # Tasks in response must belong to user1
             assert PublishTask.objects.get(pk=task_data["id"]).user == user
 

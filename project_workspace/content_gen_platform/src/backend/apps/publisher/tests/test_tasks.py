@@ -9,7 +9,7 @@ from apps.publisher.tasks import execute_publish_task
 class TestExecutePublishTask:
     @patch("apps.publisher.tasks.push_notification", new_callable=AsyncMock)
     @patch("apps.publisher.tasks.get_publisher")
-    def test_task_success(self, mock_get_publisher, mock_notify, publish_task):
+    def test_task_success(self, mock_get_publisher, mock_notify, publish_task):  # noqa
         mock_publisher = MagicMock()
         mock_result = MagicMock(success=True, post_id="post_123",
                                 post_url="https://weibo.com/post/123", error=None)

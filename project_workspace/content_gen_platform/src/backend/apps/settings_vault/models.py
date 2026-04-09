@@ -6,7 +6,7 @@ class UserServiceConfig(models.Model):
     SERVICE_CHOICES = [
         ("llm_deepseek", "DeepSeek LLM"),
         ("llm_volcano", "火山引擎（豆包）"),
-        ("jimeng", "即梦视频生成"),
+        ("jimeng", "即梦视频/图片生成"),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="service_configs")

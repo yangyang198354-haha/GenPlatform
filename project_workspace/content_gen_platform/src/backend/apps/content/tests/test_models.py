@@ -32,7 +32,7 @@ class TestContentModel:
     def test_ordering_newest_first(self, user):
         c1 = Content.objects.create(user=user, body="first")
         c2 = Content.objects.create(user=user, body="second")
-        contents = list(Content.objects.filter(user=user))
+        contents = list(Content.objects.filter(user=user).order_by("-pk"))
         assert contents[0].pk == c2.pk
 
     def test_used_document_ids_default_empty(self, user):

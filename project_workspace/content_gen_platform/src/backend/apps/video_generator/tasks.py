@@ -9,6 +9,7 @@ from django.conf import settings
 from core.encryption import decrypt
 from apps.settings_vault.models import UserServiceConfig
 from apps.notifications.service import push_notification
+from apps.media_library.service import create_media_item_from_url
 from .models import VideoProject, Scene
 from .jimeng_client import JimengAPIClient
 
@@ -96,6 +97,24 @@ def generate_video_task(self, project_id: int) -> None:
 
                 project.status = "completed"
                 project.save(update_fields=["status"])
+
+                # Auto-ingest generated video clips into media_library (REQ-FUNC-009)
+                for clip_url in status.clip_urls:
+                    if clip_url:
+                        try:
+                            create_media_item_from_url(
+                                user=project.user,
+                                url=clip_url,
+                                media_type="video",
+                                source="ai_generated",
+                                title=f"AI视频_项目{project_id}",
+                            )
+                        except Exception as media_exc:
+                            logger.warning(
+                                "Failed to create MediaItem for clip %s: %s",
+                                clip_url, media_exc,
+                            )
+
                 asyncio.run(push_notification(
                     project.user_id, "video_completed",
                     {"project_id": project_id, "clip_count": len(status.clip_urls)}
