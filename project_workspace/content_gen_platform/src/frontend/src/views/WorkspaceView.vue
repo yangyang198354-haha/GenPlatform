@@ -226,11 +226,21 @@ const startGeneration = async () => {
         const data = JSON.parse(line.slice(6))
         if (data.done) {
           generating.value = false
-          autoSaveDraft()
+          if (data.error) {
+            ElMessage.error(data.error || '生成失败，请检查 LLM 配置')
+          } else {
+            autoSaveDraft()
+          }
         } else {
           generatedText.value += data.token
         }
       }
+    }
+    // Stream closed — ensure generating flag is always reset even if done event was missed
+    if (generating.value) {
+      generating.value = false
+      if (generatedText.value) autoSaveDraft()
+      else ElMessage.error('生成中断，请检查 LLM 配置是否正确')
     }
   } catch (e) {
     if (e.name === 'AbortError') return   // user pressed stop — handled in stopGeneration

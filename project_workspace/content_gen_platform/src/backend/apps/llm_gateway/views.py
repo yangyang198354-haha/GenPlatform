@@ -144,9 +144,13 @@ def _sync_sse_generator(provider, messages, used_doc_ids):
     import asyncio
 
     async def _run():
-        async for token in provider.stream_chat(messages):
-            yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
-        yield f"data: {json.dumps({'done': True, 'used_doc_ids': used_doc_ids})}\n\n"
+        try:
+            async for token in provider.stream_chat(messages):
+                yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'used_doc_ids': used_doc_ids})}\n\n"
+        except Exception as exc:
+            logger.exception("SSE stream error during LLM call")
+            yield f"data: {json.dumps({'done': True, 'error': str(exc)})}\n\n"
 
     loop = asyncio.new_event_loop()
     try:
@@ -156,6 +160,10 @@ def _sync_sse_generator(provider, messages, used_doc_ids):
                 chunk = loop.run_until_complete(gen.__anext__())
                 yield chunk
             except StopAsyncIteration:
+                break
+            except Exception:
+                logger.exception("Unexpected error in SSE generator loop")
+                yield f"data: {json.dumps({'done': True, 'error': '服务器内部错误，请稍后重试'})}\n\n"
                 break
     finally:
         loop.close()

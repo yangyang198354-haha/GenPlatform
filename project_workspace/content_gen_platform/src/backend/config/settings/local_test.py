@@ -20,3 +20,6 @@ INSTALLED_APPS = [app for app in INSTALLED_APPS if app != "apps.knowledge_base"]
 # Use /tmp for file uploads (already set in test.py, restated for clarity)
 import tempfile, os
 MEDIA_ROOT = os.path.join(tempfile.gettempdir(), "local_test_media")
+
+# Disable throttling so test isolation is not affected by shared locmem cache
+REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []  # noqa: F821

@@ -10,8 +10,8 @@
           <el-form :model="llmForm" label-width="140px">
             <el-form-item label="服务商">
               <el-radio-group v-model="llmForm.provider">
-                <el-radio label="deepseek">DeepSeek</el-radio>
-                <el-radio label="volcano">火山引擎（豆包）</el-radio>
+                <el-radio value="deepseek">DeepSeek</el-radio>
+                <el-radio value="volcano">火山引擎（豆包）</el-radio>
               </el-radio-group>
             </el-form-item>
             <el-form-item label="API Key">
@@ -54,8 +54,8 @@
           <el-form :model="storageForm" label-width="140px">
             <el-form-item label="存储后端">
               <el-radio-group v-model="storageForm.backend">
-                <el-radio label="local">本地存储</el-radio>
-                <el-radio label="minio">MinIO</el-radio>
+                <el-radio value="local">本地存储</el-radio>
+                <el-radio value="minio">MinIO</el-radio>
               </el-radio-group>
             </el-form-item>
             <template v-if="storageForm.backend === 'minio'">

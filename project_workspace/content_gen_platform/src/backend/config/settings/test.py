@@ -26,6 +26,9 @@ CACHES = {
 CELERY_BROKER_URL = "memory://"
 CELERY_RESULT_BACKEND = "cache+memory://"
 
+# Disable throttling so test isolation is not affected by shared locmem cache
+REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []  # noqa: F821
+
 # No Redis channel layer needed in tests
 CHANNEL_LAYERS = {
     "default": {
