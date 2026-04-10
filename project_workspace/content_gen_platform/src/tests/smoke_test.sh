@@ -57,23 +57,13 @@ echo "======================================================================"
 # SM-001  Health / reachability
 info "SM-001: API reachability"
 check_http "Login endpoint reachable" "/api/v1/auth/login/" POST \
-    '{"email":"nobody@x.com","password":"wrong"}' 400
+    '{"email":"nobody@x.com","password":"wrong"}' 401
 
 # SM-002  User registration
 info "SM-002: User registration"
-REG_RESP=$(curl -s -X POST \
-    -H "Content-Type: application/json" \
-    -d "{\"username\":\"smokeuser\",\"email\":\"${SMOKE_EMAIL}\",\"password\":\"${SMOKE_PASS}\"}" \
-    "${BASE_URL}/api/v1/auth/register/")
-REG_CODE=$(echo "$REG_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print('ok')" 2>/dev/null && \
-           curl -s -o /dev/null -w "%{http_code}" -X POST \
-           -H "Content-Type: application/json" \
-           -d "{\"username\":\"smokeuser\",\"email\":\"${SMOKE_EMAIL}\",\"password\":\"${SMOKE_PASS}\"}" \
-           "${BASE_URL}/api/v1/auth/register/" || echo "000")
-# Re-run cleanly
 REG_HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
     -H "Content-Type: application/json" \
-    -d "{\"username\":\"smokeuser\",\"email\":\"${SMOKE_EMAIL}\",\"password\":\"${SMOKE_PASS}\"}" \
+    -d "{\"username\":\"smokeuser\",\"email\":\"${SMOKE_EMAIL}\",\"password\":\"${SMOKE_PASS}\",\"password2\":\"${SMOKE_PASS}\"}" \
     "${BASE_URL}/api/v1/auth/register/")
 if [ "$REG_HTTP" = "201" ]; then
     pass "SM-002: Register new user (HTTP 201)"
