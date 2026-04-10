@@ -50,9 +50,9 @@ test.describe('System Settings', () => {
     const apiKeyInput = page.getByPlaceholder('sk-...');
     await apiKeyInput.fill('');
     await page.getByRole('button', { name: '保存' }).first().click();
-    // ElementPlus shows inline form validation errors (.el-form-item__error) or toast
+    // SettingsView fires ElMessage.warning("请填写 API Key") for empty key
     await expect(
-      page.locator('.el-form-item__error, .el-message--error').first()
+      page.locator('.el-message--warning, .el-message--error, .el-form-item__error').first()
     ).toBeVisible({ timeout: 5000 });
   });
 
