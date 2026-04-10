@@ -14,7 +14,9 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost}"
-SMOKE_EMAIL="smoke_$(date +%s)@test.internal"
+SMOKE_TS="$(date +%s)"
+SMOKE_USER="smoke_${SMOKE_TS}"
+SMOKE_EMAIL="${SMOKE_USER}@test.internal"
 SMOKE_PASS="SmokeTest123!"
 PASS=0
 FAIL=0
@@ -63,7 +65,7 @@ check_http "Login endpoint reachable" "/api/v1/auth/login/" POST \
 info "SM-002: User registration"
 REG_HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
     -H "Content-Type: application/json" \
-    -d "{\"username\":\"smokeuser\",\"email\":\"${SMOKE_EMAIL}\",\"password\":\"${SMOKE_PASS}\",\"password2\":\"${SMOKE_PASS}\"}" \
+    -d "{\"username\":\"${SMOKE_USER}\",\"email\":\"${SMOKE_EMAIL}\",\"password\":\"${SMOKE_PASS}\",\"password2\":\"${SMOKE_PASS}\"}" \
     "${BASE_URL}/api/v1/auth/register/")
 if [ "$REG_HTTP" = "201" ]; then
     pass "SM-002: Register new user (HTTP 201)"
