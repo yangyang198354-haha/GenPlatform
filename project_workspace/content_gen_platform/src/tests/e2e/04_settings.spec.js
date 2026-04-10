@@ -13,7 +13,8 @@ test.describe('System Settings', () => {
   });
 
   test('E2E-004a: Settings page shows LLM and Jimeng tabs', async ({ page }) => {
-    await expect(page.getByText('系统设置')).toBeVisible();
+    // Use h1 to avoid strict-mode collision with nav sidebar text
+    await expect(page.locator('h1').filter({ hasText: '系统设置' })).toBeVisible();
     await expect(page.getByText('大语言模型')).toBeVisible();
     await expect(page.getByText('即梦 API')).toBeVisible();
     await expect(page.getByText('存储设置')).toBeVisible();
@@ -49,9 +50,9 @@ test.describe('System Settings', () => {
     const apiKeyInput = page.getByPlaceholder('sk-...');
     await apiKeyInput.fill('');
     await page.getByRole('button', { name: '保存' }).first().click();
-    // Should show an error (either validation or API error)
+    // ElementPlus shows inline form validation errors (.el-form-item__error) or toast
     await expect(
-      page.locator('.el-message--error, [class*="error"]').first()
+      page.locator('.el-form-item__error, .el-message--error').first()
     ).toBeVisible({ timeout: 5000 });
   });
 

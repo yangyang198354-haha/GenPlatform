@@ -56,9 +56,10 @@ test.describe('Workspace — Content Generation', () => {
   });
 
   test('E2E-003e: Platform selector changes style badge', async ({ page }) => {
-    const platformSelect = page.getByLabel('目标平台');
-    await platformSelect.click();
-    await page.getByText('小红书').click();
+    // ElSelect inner input is intercepted by placeholder overlay — click the wrapper div
+    const platformWrapper = page.locator('.el-select').first();
+    await platformWrapper.click();
+    await page.getByText('小红书').first().click();
     // Platform badge should appear in header
     await expect(page.getByText('小红书').first()).toBeVisible();
   });

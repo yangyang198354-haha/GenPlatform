@@ -13,12 +13,14 @@ test.describe('Content List & Publisher', () => {
 
   test('E2E-005a: Content list page renders', async ({ page }) => {
     await page.goto('/contents');
-    await expect(page.getByText('内容列表')).toBeVisible();
+    // Use h1 to avoid strict-mode collision with nav sidebar label
+    await expect(page.locator('h1').filter({ hasText: '内容列表' })).toBeVisible();
   });
 
   test('E2E-005b: Publish page renders platform account section', async ({ page }) => {
     await page.goto('/publish');
-    await expect(page.getByText('发布管理')).toBeVisible();
+    // Use heading role to avoid collision with nav sidebar
+    await expect(page.getByRole('heading', { name: '发布管理' })).toBeVisible();
   });
 
   test('E2E-005c: Navigation between all main sections works', async ({ page }) => {
