@@ -140,9 +140,9 @@ check_http "SM-007: LLM generate without config → 400" \
 info "SM-008: Media library"
 check_http "SM-008: GET /media/ with token" "/api/v1/media/" GET "" 200
 
-# SM-009  Video projects
+# SM-009  Video projects (POST-only endpoint; missing body → 400)
 info "SM-009: Video projects"
-check_http "SM-009: GET /video/projects/ with token" "/api/v1/video/projects/" GET "" 200
+check_http "SM-009: POST /video/projects/ with token" "/api/v1/video/projects/" POST "{}" 400
 
 # SM-010  Static assets (frontend)
 info "SM-010: Frontend static assets"
