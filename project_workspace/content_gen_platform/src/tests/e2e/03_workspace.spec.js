@@ -43,16 +43,21 @@ test.describe('Workspace — Content Generation', () => {
     await page.getByPlaceholder(/描述你想生成/).fill('写一篇测试文案');
     await page.getByRole('button', { name: /开始生成/ }).click();
 
-    // If generating starts, stop button should appear
+    // If generating starts, stop button should appear.
+    // Use a short timeout: when no LLM is configured the SSE stream errors
+    // immediately and the button may be detached before we can click it.
     const stopBtn = page.getByRole('button', { name: /停止生成/ });
     const isVisible = await stopBtn.isVisible({ timeout: 3000 }).catch(() => false);
     if (isVisible) {
-      await stopBtn.click();
-      // After stopping, generate button should reappear
-      await expect(page.getByRole('button', { name: /开始生成/ }))
-        .toBeVisible({ timeout: 5000 });
+      // click() may fail if the button is detached while we wait for stability
+      // (happens when SSE stream ends very quickly, e.g. no LLM configured).
+      // Catch the error and fall through — the important assertion is below.
+      await stopBtn.click({ timeout: 2000 }).catch(() => {});
     }
-    // If no stop button (already resolved/errored), test still passes
+
+    // Either way, generation must not get stuck — generate button must reappear.
+    await expect(page.getByRole('button', { name: /开始生成/ }))
+      .toBeVisible({ timeout: 10_000 });
   });
 
   test('E2E-003e: Platform selector changes style badge', async ({ page }) => {
