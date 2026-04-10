@@ -20,7 +20,7 @@ export async function registerAndLogin(page, email, password = 'E2eTest123!') {
   await page.getByPlaceholder(/your@email\.com/).fill(email);
   await page.getByPlaceholder(/至少 8 位/).fill(password);
   await page.getByPlaceholder(/再次输入/).fill(password);
-  await page.getByRole('button', { name: /注册/ }).click();
+  await page.getByRole('button', { name: /创建账号/ }).click();
   // After registration, should redirect to login
   await page.waitForURL(/\/login/);
   await page.getByPlaceholder(/your@email\.com/).fill(email);
