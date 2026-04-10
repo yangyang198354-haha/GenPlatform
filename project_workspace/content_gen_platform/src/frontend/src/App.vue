@@ -9,8 +9,18 @@ import { useAuthStore } from "@/stores/auth";
 const authStore = useAuthStore();
 
 onMounted(async () => {
-  // Only fetch profile if token exists but user data is not yet cached
-  if (authStore.accessToken && !authStore.user) {
+  if (!authStore.accessToken) return;
+  // Proactively refresh JWT if it has expired or will expire within 5 minutes
+  try {
+    const payload = JSON.parse(atob(authStore.accessToken.split('.')[1]));
+    const expiresSoon = Date.now() / 1000 >= payload.exp - 300;
+    if (expiresSoon) {
+      await authStore.refreshToken();
+    }
+  } catch {
+    // Malformed token — let the response interceptor handle 401
+  }
+  if (!authStore.user) {
     await authStore.fetchProfile();
   }
 });
