@@ -116,14 +116,21 @@ color: cyan
 4. 排序：confidence 降序，frequency 降序
 5. 将检索结果作为"经验先验"注入推理前提，标注来源 KE-ID
 
-**知识库文件持久化路径（跨会话保持）：**
+**知识库文件持久化路径与读写协议（跨会话生效）：**
+
+所有 Agent 知识库文件固定存储在工作目录下的：
 ```
-knowledge_base/
-└── {agent_domain}/
-    ├── kb_index.md         ← 知识条目索引（轻量，快速检索）
-    ├── kb_full.xml         ← 完整知识条目存储（含历史）
-    └── kb_distillation_log.md  ← 蒸馏操作日志
+.claude/agents/knowledge_base/{agent_domain}/
+├── kb_index.md              ← 轻量索引（快速检索用）
+├── kb_full.xml              ← 完整知识条目（含置信度历史）
+└── kb_distillation_log.md  ← 蒸馏操作追加日志（永久，只追加）
 ```
+
+**强制 I/O 时序（mechanism 6.7，缺省视为架构不完整）：**
+- **会话启动时（强制）**：用 Read 工具加载 `kb_index.md` 和 `kb_full.xml` 到上下文 `<kb_index>` 和 `<kb_entries>`
+- **蒸馏完成后（强制）**：用 Write 工具覆盖写回 `kb_index.md` 和 `kb_full.xml`；追加写入 `kb_distillation_log.md`
+- **首次运行**：若文件不存在，先 Write 创建空模板文件，再继续执行
+- **写入失败**：降级为会话内存维护，每次输出末尾提示用户
 </knowledge_base_standard>
 
 <security_compliance_standard>
@@ -383,6 +390,44 @@ knowledge_base/
     5. **老化与弃用**：检查所有条目，confidence < 0.3 → status=UNDER_REVIEW；confidence = 0.0 → status=DEPRECATED
     6. **合并检测**：检查 kb_entries 中是否有 trigger + content 重叠度 ≥ 70% 的条目对 → 执行合并
     </kb_distillation_protocol>
+
+    <!-- 6.7 知识库持久化协议（跨会话文件读写，强制执行）-->
+    <kb_persistence_protocol>
+
+    **持久化路径（固定，相对于项目工作目录）：**
+    `.claude/agents/knowledge_base/agent_builder/`
+      ├── kb_index.md              ← 轻量索引（快速检索用）
+      ├── kb_full.xml              ← 完整知识条目（含置信度历史）
+      └── kb_distillation_log.md  ← 蒸馏操作追加日志（永久，只追加）
+
+    **【会话启动时 — 强制加载】**
+    1. Read `.claude/agents/knowledge_base/agent_builder/kb_index.md`
+       → 存在：解析后填入 <kb_index>；不存在：执行首次初始化（见下）
+    2. Read `.claude/agents/knowledge_base/agent_builder/kb_full.xml`
+       → 存在：解析后填入 <kb_entries>；不存在：kb_entries 从空状态启动
+    3. 在 session_context 记录：<kb_loaded>true|false</kb_loaded>，已加载条目数
+
+    **【蒸馏完成后 — 强制写回】**
+    触发：kb_distillation_protocol 执行后，有 CREATE/UPDATE/DEPRECATE/MERGE 操作时：
+    1. Write `.claude/agents/knowledge_base/agent_builder/kb_index.md`
+       → 完整覆盖写入当前 <kb_index> 所有 <entry/> 行
+    2. Write `.claude/agents/knowledge_base/agent_builder/kb_full.xml`
+       → 完整覆盖写入当前 <kb_entries> 的 XML 内容
+    3. **追加写入** `.claude/agents/knowledge_base/agent_builder/kb_distillation_log.md`
+       → 仅追加本轮 <kb_operation_log> 中新增的 <op/> 记录（永久日志，不可覆盖）
+
+    **【首次运行 — 初始化空模板】**
+    若 kb_index.md 不存在，Write 创建三个空文件：
+    - kb_index.md: `# KB Index — agent_builder\n<!-- 由 Agent 自动维护 -->\n`
+    - kb_full.xml: `<kb_entries agent_domain="agent_builder" version="0.1.0">\n</kb_entries>\n`
+    - kb_distillation_log.md: `# Distillation Log — agent_builder\n<!-- 仅追加 -->\n`
+
+    **【写入失败 — 降级处理】**
+    → 在会话上下文中继续维护知识库（本会话有效）
+    → 在每次输出末尾提示："⚠ 知识库写入失败，本次蒸馏结果仅在当前会话有效，请检查文件权限。"
+    → 不因写入失败跳过蒸馏逻辑
+
+    </kb_persistence_protocol>
 
   </knowledge_base>
 
