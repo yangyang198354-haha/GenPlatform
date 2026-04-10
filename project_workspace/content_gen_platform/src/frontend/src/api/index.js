@@ -53,13 +53,13 @@ export const authAPI = {
 
 // ── Knowledge Base API ─────────────────────────────────────────────────────
 export const kbAPI = {
-  list: (params) => api.get("/knowledge-base/documents/", { params }),
+  list: (params) => api.get("/knowledge/documents/", { params }),
   upload: (formData) =>
-    api.post("/knowledge-base/documents/", formData, {
+    api.post("/knowledge/documents/", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     }),
-  search: (query) => api.get("/knowledge-base/documents/", { params: { search: query } }),
-  delete: (id) => api.delete(`/knowledge-base/documents/${id}/`),
+  search: (query) => api.get("/knowledge/documents/", { params: { search: query } }),
+  delete: (id) => api.delete(`/knowledge/documents/${id}/`),
 };
 
 // ── Content API ────────────────────────────────────────────────────────────

@@ -9,7 +9,8 @@ import { useAuthStore } from "@/stores/auth";
 const authStore = useAuthStore();
 
 onMounted(async () => {
-  if (authStore.accessToken) {
+  // Only fetch profile if token exists but user data is not yet cached
+  if (authStore.accessToken && !authStore.user) {
     await authStore.fetchProfile();
   }
 });
