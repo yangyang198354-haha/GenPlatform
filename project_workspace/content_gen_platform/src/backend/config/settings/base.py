@@ -156,6 +156,11 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+# Must match the -Q flag in docker-compose.yml celery_worker command.
+# Celery's built-in default queue is named "celery", but our worker
+# listens to "default". Without this setting, all tasks without an
+# explicit queue= are sent to "celery" and never processed.
+CELERY_TASK_DEFAULT_QUEUE = "default"
 
 # ── Django Channels ───────────────────────────────────────────────────────────
 CHANNEL_LAYERS = {
