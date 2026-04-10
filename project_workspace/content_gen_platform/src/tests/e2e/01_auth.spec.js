@@ -22,8 +22,8 @@ test.describe('Authentication', () => {
 
   test('E2E-001c: Invalid credentials show error', async ({ page }) => {
     await page.goto('/login');
-    await page.getByPlaceholder(/邮箱/).fill('nobody@example.com');
-    await page.getByPlaceholder(/密码/).fill('WrongPassword!');
+    await page.getByPlaceholder(/your@email\.com/).fill('nobody@example.com');
+    await page.getByPlaceholder(/输入密码/).fill('WrongPassword!');
     await page.getByRole('button', { name: /登录/ }).click();
     // Should stay on login and show error
     await expect(page).toHaveURL(/\/login/);

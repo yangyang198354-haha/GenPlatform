@@ -16,14 +16,15 @@ export function uniqueEmail() {
  */
 export async function registerAndLogin(page, email, password = 'E2eTest123!') {
   await page.goto('/register');
-  await page.getByPlaceholder(/用户名/).fill(email.split('@')[0]);
-  await page.getByPlaceholder(/邮箱/).fill(email);
-  await page.getByPlaceholder(/密码/).fill(password);
+  await page.getByPlaceholder(/至少 2 个字符/).fill(email.split('@')[0]);
+  await page.getByPlaceholder(/your@email\.com/).fill(email);
+  await page.getByPlaceholder(/至少 8 位/).fill(password);
+  await page.getByPlaceholder(/再次输入/).fill(password);
   await page.getByRole('button', { name: /注册/ }).click();
   // After registration, should redirect to login
   await page.waitForURL(/\/login/);
-  await page.getByPlaceholder(/邮箱/).fill(email);
-  await page.getByPlaceholder(/密码/).fill(password);
+  await page.getByPlaceholder(/your@email\.com/).fill(email);
+  await page.getByPlaceholder(/输入密码/).fill(password);
   await page.getByRole('button', { name: /登录/ }).click();
   await page.waitForURL(/\/(workspace|knowledge)/);
 }
@@ -33,8 +34,8 @@ export async function registerAndLogin(page, email, password = 'E2eTest123!') {
  */
 export async function login(page, email, password = 'E2eTest123!') {
   await page.goto('/login');
-  await page.getByPlaceholder(/邮箱/).fill(email);
-  await page.getByPlaceholder(/密码/).fill(password);
+  await page.getByPlaceholder(/your@email\.com/).fill(email);
+  await page.getByPlaceholder(/输入密码/).fill(password);
   await page.getByRole('button', { name: /登录/ }).click();
   await page.waitForURL(/\/(workspace|knowledge)/);
 }
