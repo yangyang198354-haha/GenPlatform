@@ -609,3 +609,88 @@ class TestSearch:
         results = search(user.pk, "query", top_k=1)
         assert results
         assert results[0].document_id == doc.pk
+
+    # ── hybrid search: anchor chunk injection ─────────────────────────────────
+
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_anchor_chunk_always_included(self, mock_get_model, user, tmp_path):
+        """
+        Regression: chunk_index=0 of any document that scores a semantic hit
+        must always appear in results, even if it is semantically distant from
+        the query.
+
+        This is the "community name" scenario:
+          - chunk 0 contains the document title / named entities (e.g. community
+            name "红枫岭枫和苑") — semantically distant from the query topic
+          - chunk 1 is about voting rules — semantically close to the query
+          - Pure semantic search would only return chunk 1 and miss the name.
+          - With anchor injection, chunk 0 is always included alongside chunk 1.
+        """
+        doc = self._make_available_doc(user, tmp_path)
+
+        # chunk 0: document header with community name — embedding all 1s (far)
+        vec_far  = np.ones(512,  dtype="float32")
+        # chunk 1: voting rules — embedding all 0s (identical to query → nearest)
+        vec_near = np.zeros(512, dtype="float32")
+        anchor_chunk  = self._make_chunk(doc, 0, "红枫岭枫和苑小区议事规则总则", vec_far)
+        content_chunk = self._make_chunk(doc, 1, "业主大会投票权数计算方法",       vec_near)
+
+        # Query embedding = all 0s → only chunk 1 would be returned by pure semantic
+        mock_model = MagicMock()
+        mock_model.encode.return_value = vec_near.reshape(1, 512)
+        mock_get_model.return_value = mock_model
+
+        results = search(user.pk, "业主大会投票权数", top_k=1)
+        result_pks = {r.pk for r in results}
+
+        assert content_chunk.pk in result_pks, (
+            "The nearest semantic chunk (voting rules) must always be returned."
+        )
+        assert anchor_chunk.pk in result_pks, (
+            "chunk_index=0 (document header with community name) must be injected "
+            "even when it is semantically distant from the query (anchor injection)."
+        )
+
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_keyword_fallback_finds_exact_term_chunk(self, mock_get_model, user, tmp_path):
+        """
+        Keyword fallback must surface chunks that contain query terms verbatim
+        even when those chunks are far from the query embedding.
+
+        Scenario: the query explicitly mentions "车位" (parking space).
+        One chunk is semantically close but doesn't contain the word "车位".
+        Another chunk is semantically distant but does contain "车位".
+        The keyword chunk must appear in the merged results.
+        """
+        doc = self._make_available_doc(user, tmp_path)
+
+        vec_near = np.zeros(512, dtype="float32")
+        vec_far  = np.ones(512,  dtype="float32")
+        # index 1: near but does NOT mention 车位
+        sem_chunk = self._make_chunk(doc, 1, "投票权数的一般性规定", vec_near)
+        # index 2: far but DOES mention 车位 — keyword fallback must rescue this
+        kw_chunk  = self._make_chunk(doc, 2, "车位面积不计入业主投票权数", vec_far)
+
+        mock_model = MagicMock()
+        mock_model.encode.return_value = vec_near.reshape(1, 512)
+        mock_get_model.return_value = mock_model
+
+        results = search(user.pk, "车位是否计入投票权数", top_k=2)
+        result_pks = {r.pk for r in results}
+
+        assert kw_chunk.pk in result_pks, (
+            "Chunk containing the query keyword '车位' must be returned via "
+            "keyword fallback even when its embedding is semantically distant."
+        )
+
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_extract_cn_keywords_returns_chinese_ngrams(self, mock_get_model, user):
+        """_extract_cn_keywords() must return multi-char Chinese ngrams."""
+        from apps.knowledge_base.services import _extract_cn_keywords
+        kws = _extract_cn_keywords("业主大会中车位是否计入投票权数")
+        # Must contain at least some 2-char and 4-char Chinese terms
+        assert any(len(k) == 4 for k in kws), "Expected 4-char ngrams"
+        assert any(len(k) == 2 for k in kws), "Expected 2-char ngrams"
+        # The specific terms important for the community-name scenario
+        assert "车位" in kws
+        assert "业主大会" in kws

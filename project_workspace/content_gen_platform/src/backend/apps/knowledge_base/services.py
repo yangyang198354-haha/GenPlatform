@@ -1,5 +1,6 @@
 """Knowledge base processing: chunking, embedding, and RAG retrieval."""
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, List
 
@@ -170,20 +171,104 @@ def process_document(document_id: int) -> None:
         Document.objects.filter(pk=document_id).update(status="error", error_message=str(e))
 
 
-def search(user_id: int, query: str, top_k: int = 3) -> List[DocumentChunk]:
+def _extract_cn_keywords(text: str) -> List[str]:
     """
-    Semantic search in a user's knowledge base.
-    Returns top_k most similar chunks ordered by L2 distance.
+    Extract candidate Chinese keyword phrases from text without external deps.
+
+    Scans all runs of 2+ consecutive Chinese characters and generates sliding
+    windows of length 2-4.  Longer windows are returned first so callers can
+    prefer more-specific terms when building OR-filter chains.
+
+    Example:
+        "业主大会中车位是否计入投票权数"
+        → ["业主大会", "主大会中", ..., "车位", "投票权数", ...]
     """
+    keywords: list[str] = []
+    seen: set[str] = set()
+    # Find all runs of 2+ consecutive CJK unified ideographs
+    for run in re.findall(r'[\u4e00-\u9fff]{2,}', text):
+        for n in (4, 3, 2):           # longer first → more specific
+            for i in range(len(run) - n + 1):
+                kw = run[i : i + n]
+                if kw not in seen:
+                    seen.add(kw)
+                    keywords.append(kw)
+    return keywords
+
+
+def search(user_id: int, query: str, top_k: int = 5) -> List[DocumentChunk]:
+    """
+    Hybrid RAG retrieval: semantic + anchor-chunk injection + keyword fallback.
+
+    Pure semantic (vector) search fails for queries like "tell me the community
+    name" when the name only appears in the document header (chunk_index=0) and
+    the query is semantically about a different topic (e.g. voting rules).
+
+    Three-layer strategy
+    --------------------
+    1. **Semantic** — L2Distance on embeddings finds the thematically closest
+       chunks (e.g. voting-rule paragraphs).  Fetches top_k * 2 candidates to
+       give the later merge stages more material to work with.
+
+    2. **Anchor injection** — chunk_index=0 of every document that produced a
+       semantic hit is always included.  The first chunk of a document typically
+       contains its title and key named entities (e.g. the community name
+       "红枫岭枫和苑").  This ensures document-level metadata is never silently
+       dropped regardless of query topic.
+
+    3. **Keyword fallback** — runs a simple icontains OR-filter for 2-4 char
+       Chinese ngrams extracted from the query.  Catches chunks that mention
+       query terms verbatim but score poorly on cosine/L2 distance (e.g. a
+       definitions section that lists key terms).
+
+    Returns at most top_k + (number of injected anchor chunks) results so that
+    anchors never displace genuinely relevant semantic hits.
+    """
+    from django.db.models import Q  # noqa: PLC0415
+
     model = _get_embedding_model()
     query_embedding = model.encode([query], normalize_embeddings=True)[0].tolist()
 
-    chunks = (
-        DocumentChunk.objects.filter(
-            document__user_id=user_id,
-            document__status="available",
-        )
-        .annotate(distance=L2Distance("embedding", query_embedding))
-        .order_by("distance")[:top_k]
+    base_qs = DocumentChunk.objects.filter(
+        document__user_id=user_id,
+        document__status="available",
     )
-    return list(chunks)
+
+    # ── Layer 1: Semantic search ─────────────────────────────────────────────
+    semantic_results: List[DocumentChunk] = list(
+        base_qs
+        .annotate(distance=L2Distance("embedding", query_embedding))
+        .order_by("distance")[: top_k * 2]
+    )
+    seen_pks: set[int] = {c.pk for c in semantic_results}
+    hit_doc_ids: set[int] = {c.document_id for c in semantic_results}
+
+    # ── Layer 2: Anchor chunk injection ──────────────────────────────────────
+    # Always include the first chunk of every document that had a semantic hit.
+    anchor_chunks: List[DocumentChunk] = list(
+        base_qs
+        .filter(document_id__in=hit_doc_ids, chunk_index=0)
+        .exclude(pk__in=seen_pks)
+    )
+    seen_pks.update(c.pk for c in anchor_chunks)
+
+    # ── Layer 3: Keyword fallback ─────────────────────────────────────────────
+    keywords = _extract_cn_keywords(query)
+    keyword_chunks: List[DocumentChunk] = []
+    if keywords:
+        kw_q = Q()
+        for kw in keywords[:15]:     # cap OR-chain length to avoid slow plans
+            kw_q |= Q(content__icontains=kw)
+        keyword_chunks = list(
+            base_qs
+            .filter(kw_q)
+            .exclude(pk__in=seen_pks)
+            .order_by("chunk_index")[: top_k]
+        )
+
+    # ── Merge ────────────────────────────────────────────────────────────────
+    # Order: semantic (ranked by relevance) → anchors → keyword extras.
+    # Cap total at top_k (semantic) + len(anchors) so we never drop an anchor.
+    combined = semantic_results + anchor_chunks + keyword_chunks
+    cap = top_k + len(anchor_chunks)
+    return combined[:cap]

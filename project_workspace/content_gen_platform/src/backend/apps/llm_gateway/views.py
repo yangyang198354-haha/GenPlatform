@@ -90,7 +90,7 @@ class GenerateContentView(APIView):
         if use_kb and "apps.knowledge_base" in settings.INSTALLED_APPS:
             try:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(_kb_search, request.user.pk, prompt, top_k=3)
+                    future = pool.submit(_kb_search, request.user.pk, prompt, top_k=5)
                     chunks = future.result(timeout=_KB_SEARCH_TIMEOUT_SECONDS)
                 for chunk in chunks:
                     context_parts.append(chunk.content)
