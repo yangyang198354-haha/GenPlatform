@@ -172,7 +172,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, markRaw } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Upload, UploadFilled, Delete, Download, VideoPlay, Headset,
@@ -180,14 +180,17 @@ import {
 } from '@element-plus/icons-vue'
 import { mediaAPI } from '@/api'
 
-// Filter state — use imported component references, not strings.
-// <component :is="stringName"> only works for globally registered components;
-// Element Plus icons are NOT registered globally by app.use(ElementPlus).
+// Filter state — wrap icon components with markRaw() to prevent Vue from
+// converting them into reactive proxies.  Putting a component definition
+// object inside a plain const causes Vite to minify it; Vue's reactivity
+// system then tries to proxy the minified reference and hits a Temporal
+// Dead Zone (TDZ) error: "Cannot access 'x' before initialization".
+// markRaw() opts the object out of Vue's reactivity, eliminating the TDZ.
 const filterTabs = [
-  { value: 'all', label: '全部', icon: Files },
-  { value: 'image', label: '图片', icon: Picture },
-  { value: 'video', label: '视频', icon: Film },
-  { value: 'audio', label: '音频', icon: Microphone },
+  { value: 'all',   label: '全部', icon: markRaw(Files)      },
+  { value: 'image', label: '图片', icon: markRaw(Picture)    },
+  { value: 'video', label: '视频', icon: markRaw(Film)       },
+  { value: 'audio', label: '音频', icon: markRaw(Microphone) },
 ]
 const activeFilter = ref('all')
 

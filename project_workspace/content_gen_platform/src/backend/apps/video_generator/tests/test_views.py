@@ -52,6 +52,56 @@ FAKE_SCENES = [
 
 
 @pytest.mark.django_db
+class TestVideoProjectListView:
+    """GET /api/v1/video/projects/ — lists the authenticated user's projects."""
+
+    def test_list_returns_empty_for_new_user(self, auth_client):
+        client, _ = auth_client
+        resp = client.get(PROJECTS_URL)
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data == []
+
+    def test_list_returns_own_projects(self, auth_client, video_project):
+        client, _ = auth_client
+        resp = client.get(PROJECTS_URL)
+        assert resp.status_code == status.HTTP_200_OK
+        assert len(resp.data) == 1
+        assert resp.data[0]["id"] == video_project.pk
+
+    def test_list_does_not_include_other_user_projects(self, auth_client, auth_client2, video_project):
+        # video_project belongs to user (auth_client), user2 should not see it
+        client2, _ = auth_client2
+        resp = client2.get(PROJECTS_URL)
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data == []
+
+    def test_list_ordered_newest_first(self, auth_client, confirmed_content, user):
+        from apps.video_generator.models import VideoProject
+        p1 = VideoProject.objects.create(user=user, content=confirmed_content, status="draft")
+        p2 = VideoProject.objects.create(user=user, content=confirmed_content, status="draft")
+        client, _ = auth_client
+        resp = client.get(PROJECTS_URL)
+        assert resp.status_code == status.HTTP_200_OK
+        ids = [item["id"] for item in resp.data]
+        assert ids.index(p2.pk) < ids.index(p1.pk)  # p2 (newer) comes first
+
+    def test_list_requires_auth(self, api_client):
+        resp = api_client.get(PROJECTS_URL)
+        assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_list_response_shape(self, auth_client, video_project, scene):
+        client, _ = auth_client
+        resp = client.get(PROJECTS_URL)
+        assert resp.status_code == status.HTTP_200_OK
+        p = resp.data[0]
+        assert "id" in p
+        assert "status" in p
+        assert "scenes" in p
+        assert "content_title" in p
+        assert "created_at" in p
+
+
+@pytest.mark.django_db
 class TestVideoProjectCreateView:
     @patch("apps.video_generator.views.generate_scenes_from_content", return_value=FAKE_SCENES)
     def test_create_project_success(self, mock_gen, auth_client, confirmed_content):

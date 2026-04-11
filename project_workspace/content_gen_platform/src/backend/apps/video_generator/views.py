@@ -18,7 +18,19 @@ logger = logging.getLogger(__name__)
 
 
 class VideoProjectCreateView(APIView):
-    """POST /api/v1/video/projects/ — create video project from confirmed content."""
+    """
+    GET  /api/v1/video/projects/  — list the authenticated user's video projects.
+    POST /api/v1/video/projects/  — create a video project from confirmed content.
+    """
+
+    def get(self, request):
+        projects = (
+            VideoProject.objects.filter(user=request.user)
+            .prefetch_related("scenes")
+            .order_by("-created_at")
+        )
+        serializer = VideoProjectSerializer(projects, many=True)
+        return Response(serializer.data)
 
     def post(self, request):
         content_id = request.data.get("content_id")
