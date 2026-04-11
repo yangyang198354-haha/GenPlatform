@@ -477,6 +477,10 @@ jobs:
             done
             echo "Production deploy OK"
 
+            # Diagnostics: show celery worker startup logs to confirm model loads
+            echo "--- Celery worker startup logs ---"
+            docker compose logs --tail=50 celery_worker || true
+
   # Stage 8: Post-deploy Smoke Tests
   smoke-test:
     name: Post-deploy Smoke Tests

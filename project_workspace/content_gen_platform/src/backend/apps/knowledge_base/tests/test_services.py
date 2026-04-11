@@ -93,7 +93,7 @@ class TestProcessDocument:
         # Mock the embedding model to return fake vectors
         mock_model = MagicMock()
         import numpy as np
-        mock_model.encode.return_value = np.zeros((1, 1024), dtype="float32")
+        mock_model.encode.return_value = np.zeros((1, 512), dtype="float32")
         mock_get_model.return_value = mock_model
 
         doc = self._make_doc(user, tmp_path)
@@ -110,7 +110,7 @@ class TestProcessDocument:
         import numpy as np
 
         mock_model = MagicMock()
-        mock_model.encode.return_value = np.zeros((1, 1024), dtype="float32")
+        mock_model.encode.return_value = np.zeros((1, 512), dtype="float32")
         mock_get_model.return_value = mock_model
 
         doc = self._make_doc(user, tmp_path)
@@ -124,7 +124,7 @@ class TestProcessDocument:
         import numpy as np
 
         mock_model = MagicMock()
-        mock_model.encode.return_value = np.zeros((1, 1024), dtype="float32")
+        mock_model.encode.return_value = np.zeros((1, 512), dtype="float32")
         mock_get_model.return_value = mock_model
 
         doc = self._make_doc(user, tmp_path)

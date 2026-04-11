@@ -27,6 +27,14 @@ RUN if [ "$TARGETPLATFORM" = "linux/amd64" ]; then \
 RUN grep -Ev "^(torch|sentence-transformers)==" requirements.txt | \
     pip install --no-cache-dir -r /dev/stdin
 
+# Pre-download embedding model during CI build (GitHub Actions has direct HF access).
+# bge-small-zh-v1.5 is ~90 MB; this avoids a 90 MB download on every server restart
+# and prevents runtime failures on servers behind GFW or with limited RAM.
+# This layer is cached by Docker as long as the sentence-transformers version
+# and model name don't change.
+ARG EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}')"
+
 # Copy project
 COPY . .
 

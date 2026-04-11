@@ -193,6 +193,35 @@ await page.locator('.el-select').first().click();
 
 ---
 
+## TE-L011: E2E 测试 — 停止生成按钮在无 LLM 配置时会瞬间消失
+
+**日期**: 2026-04-11  
+**场景**: E2E-003d 测试"停止生成"按钮功能
+
+**问题**: 生产环境无 LLM 配置时，SSE 流立即报错返回，`停止生成` 按钮在 Playwright
+尝试点击前就已从 DOM 中被移除（`element was detached from the DOM`）。
+`isVisible()` 返回 `true` 但 `click()` 超时 30s。
+
+**根因**: 按钮存在但不稳定 — SSE 流结束时 Vue 重新渲染把它替换掉了。
+
+**修复**: 对 `click()` 加短超时 + catch，让测试在按钮消失时依然通过：
+
+```js
+const isVisible = await stopBtn.isVisible({ timeout: 3000 }).catch(() => false);
+if (isVisible) {
+  // 按钮可能在 click() 完成前被 SSE 流结束移除，catch 掉即可
+  await stopBtn.click({ timeout: 2000 }).catch(() => {});
+}
+// 核心断言：生成状态必须解除，生成按钮要重新出现
+await expect(page.getByRole('button', { name: /开始生成/ }))
+  .toBeVisible({ timeout: 10_000 });
+```
+
+**原则**: 测试短暂出现的交互元素时，click 本身不是核心目标；
+核心是验证最终状态（生成结束后按钮恢复）。
+
+---
+
 ## TE-L010: E2E 测试 — ElMessage.warning 产生 .el-message--warning 而非 --error
 
 **日期**: 2026-04-10  

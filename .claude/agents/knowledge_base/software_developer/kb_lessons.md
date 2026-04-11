@@ -157,3 +157,51 @@ if (!llmForm.value.api_key) {
 ```python
 REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
 ```
+
+---
+
+## SD-L009: Celery 队列路由 — CELERY_TASK_DEFAULT_QUEUE 必须与 worker -Q 对齐
+
+**日期**: 2026-04-11  
+**文件**: `config/settings/base.py`, `docker-compose.yml`
+
+**问题**: Celery 内置默认队列名是 `celery`，但 docker-compose.yml 中
+celery_worker 启动参数是 `-Q default,video,publish`，只消费 `default` 队列。
+未设置 `CELERY_TASK_DEFAULT_QUEUE` 时，所有没有显式 `queue=` 的任务都发送到
+`celery` 队列，worker 永远不会处理它们。
+
+**现象**: 上传文档后状态永远停留在"处理中"（`processing`），`chunk_count=0`。
+
+**修复**:
+```python
+# config/settings/base.py
+CELERY_TASK_DEFAULT_QUEUE = "default"  # 必须与 worker -Q 里的队列名一致
+```
+
+**教训**: 每次修改 docker-compose.yml 中 worker 的 `-Q` 参数，或新增
+`CELERY_TASK_DEFAULT_QUEUE`，必须同步检查另一侧。两者不一致会导致任务
+静默积压而无任何报错。
+
+---
+
+## SD-L010: Celery 任务 — max_retries=0 避免 retry 覆盖 error 状态
+
+**日期**: 2026-04-11  
+**文件**: `apps/knowledge_base/tasks.py`
+
+`_process_document()` 内部捕获所有异常并将文档状态设为 `error`。
+如果任务设置了 `max_retries > 0`，retry 会把状态重置回 `processing`，
+用户看到文档闪烁或永远卡在处理中。
+
+**正确做法**:
+```python
+@shared_task(bind=True, max_retries=0)
+def process_document_task(self, document_id: int) -> None:
+    try:
+        _process_document(document_id)
+    except Exception as exc:
+        # _process_document 意外抛出时兜底（如 DB 宕机）
+        Document.objects.filter(pk=document_id).update(
+            status="error", error_message=f"Task error: {exc}"
+        )
+```

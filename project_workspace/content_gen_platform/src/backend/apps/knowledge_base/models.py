@@ -33,7 +33,7 @@ class DocumentChunk(models.Model):
     document = models.ForeignKey(Document, on_delete=models.CASCADE, related_name="chunks")
     chunk_index = models.IntegerField()
     content = models.TextField()
-    embedding = VectorField(dimensions=1024)  # bge-m3 output dimension
+    embedding = VectorField(dimensions=512)  # bge-small-zh-v1.5 output dimension
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

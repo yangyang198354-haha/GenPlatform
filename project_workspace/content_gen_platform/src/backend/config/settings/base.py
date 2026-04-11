@@ -189,7 +189,7 @@ if STORAGE_BACKEND == "minio":
     AWS_DEFAULT_ACL = "private"
 
 # ── Knowledge Base / Embedding ────────────────────────────────────────────────
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-m3")
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "BAAI/bge-small-zh-v1.5")
 EMBEDDING_DEVICE = os.environ.get("EMBEDDING_DEVICE", "cpu")
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 64
