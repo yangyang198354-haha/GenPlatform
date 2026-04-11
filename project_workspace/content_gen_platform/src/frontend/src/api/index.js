@@ -116,9 +116,12 @@ export const videoAPI = {
   listProjects: (params) => api.get("/video/projects/", { params }),
   createProject: (data) => api.post("/video/projects/", data),
   getProject: (id) => api.get(`/video/projects/${id}/`),
+  getStatus: (id) => api.get(`/video/projects/${id}/status/`),
   generate: (id) => api.post(`/video/projects/${id}/generate/`),
   updateScene: (projectId, sceneId, data) =>
     api.patch(`/video/projects/${projectId}/scenes/${sceneId}/`, data),
+  deleteScene: (projectId, sceneId) =>
+    api.delete(`/video/projects/${projectId}/scenes/${sceneId}/`),
   reorderScenes: (projectId, sceneIds) =>
     api.post(`/video/projects/${projectId}/reorder/`, { scene_ids: sceneIds }),
   exportVideo: (id) => api.post(`/video/projects/${id}/export/`),

@@ -5,7 +5,7 @@
     </div>
 
     <el-table :data="projects" v-loading="loading" stripe @row-click="openProject">
-      <el-table-column prop="title" label="项目名称" min-width="200" />
+      <el-table-column prop="content_title" label="项目名称" min-width="200" />
       <el-table-column label="分镜数" width="100">
         <template #default="{ row }">{{ row.scene_count ?? "-" }}</template>
       </el-table-column>

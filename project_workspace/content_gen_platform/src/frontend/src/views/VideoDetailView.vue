@@ -88,6 +88,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Rank } from '@element-plus/icons-vue'
+import draggable from 'vuedraggable'
 import { videoAPI } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 
