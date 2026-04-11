@@ -176,16 +176,18 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Upload, UploadFilled, Delete, Download, VideoPlay, Headset,
-  Picture, Film, Microphone
+  Picture, Film, Microphone, Files,
 } from '@element-plus/icons-vue'
 import { mediaAPI } from '@/api'
 
-// Filter state
+// Filter state — use imported component references, not strings.
+// <component :is="stringName"> only works for globally registered components;
+// Element Plus icons are NOT registered globally by app.use(ElementPlus).
 const filterTabs = [
-  { value: 'all', label: '全部', icon: 'Files' },
-  { value: 'image', label: '图片', icon: 'Picture' },
-  { value: 'video', label: '视频', icon: 'Film' },
-  { value: 'audio', label: '音频', icon: 'Microphone' },
+  { value: 'all', label: '全部', icon: Files },
+  { value: 'image', label: '图片', icon: Picture },
+  { value: 'video', label: '视频', icon: Film },
+  { value: 'audio', label: '音频', icon: Microphone },
 ]
 const activeFilter = ref('all')
 
@@ -245,6 +247,9 @@ const fetchItems = async () => {
       items.value = [...items.value, ...newItems]
     }
     total.value = data.count ?? newItems.length
+  } catch (err) {
+    const msg = err.response?.data?.error || '加载素材库失败，请刷新重试'
+    ElMessage.error(msg)
   } finally {
     loading.value = false
   }

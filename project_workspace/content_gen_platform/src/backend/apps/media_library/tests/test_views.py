@@ -7,9 +7,12 @@ from rest_framework import status
 from apps.media_library.models import MediaItem
 
 
+_EXT = {"image": "jpg", "video": "mp4", "audio": "mp3"}
+
 def make_item(user, media_type="image", source="uploaded", title="Test"):
+    ext = _EXT.get(media_type, "bin")
     item = MediaItem(owner=user, media_type=media_type, source=source, title=title)
-    item.file.save(f"test.{media_type[:3]}", ContentFile(b"data"), save=True)
+    item.file.save(f"test.{ext}", ContentFile(b"data"), save=True)
     return item
 
 
