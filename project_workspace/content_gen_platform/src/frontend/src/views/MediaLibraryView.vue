@@ -5,7 +5,7 @@
         <h2>素材库</h2>
         <span class="item-count" v-if="total > 0">{{ total }} 个文件</span>
       </div>
-      <el-button type="primary" :icon="Upload" @click="showUploadDialog = true">
+      <el-button type="primary" :icon="IconUpload" @click="showUploadDialog = true">
         上传素材
       </el-button>
     </div>
@@ -49,11 +49,11 @@
           <div v-else-if="item.media_type === 'video'" class="thumb-video">
             <video :src="item.file_url" class="thumb-img" preload="metadata" />
             <div class="video-overlay">
-              <el-icon class="play-icon"><VideoPlay /></el-icon>
+              <el-icon class="play-icon"><component :is="IconVideoPlay" /></el-icon>
             </div>
           </div>
           <div v-else class="thumb-audio">
-            <el-icon class="audio-icon"><Headset /></el-icon>
+            <el-icon class="audio-icon"><component :is="IconHeadset" /></el-icon>
           </div>
 
           <!-- Hover Actions Overlay -->
@@ -64,7 +64,7 @@
                   <el-button
                     circle
                     size="small"
-                    :icon="Download"
+                    :icon="IconDownload"
                     @click="downloadItem(item)"
                   />
                 </el-tooltip>
@@ -73,7 +73,7 @@
                     circle
                     size="small"
                     type="danger"
-                    :icon="Delete"
+                    :icon="IconDelete"
                     @click="confirmDelete(item)"
                   />
                 </el-tooltip>
@@ -138,7 +138,7 @@
               :limit="1"
               class="uploader"
             >
-              <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
+              <el-icon class="el-icon--upload"><component :is="IconUploadFilled" /></el-icon>
               <div class="el-upload__text">
                 拖拽文件到此处，或 <em>点击上传</em>
               </div>
@@ -180,17 +180,31 @@ import {
 } from '@element-plus/icons-vue'
 import { mediaAPI } from '@/api'
 
-// Filter state — wrap icon components with markRaw() to prevent Vue from
-// converting them into reactive proxies.  Putting a component definition
-// object inside a plain const causes Vite to minify it; Vue's reactivity
-// system then tries to proxy the minified reference and hits a Temporal
-// Dead Zone (TDZ) error: "Cannot access 'x' before initialization".
-// markRaw() opts the object out of Vue's reactivity, eliminating the TDZ.
+// ── Icon safety ────────────────────────────────────────────────────────────
+// Vite's production build minifies icon component objects and may reorder
+// their const declarations relative to usage sites, causing a Temporal Dead
+// Zone (TDZ) error: "Cannot access 'X' before initialization".
+//
+// Fix: call markRaw() on EVERY icon variable at the very top of setup,
+// before any reactive state or lifecycle hooks reference them.  markRaw()
+// stamps a __v_skip flag so Vue's reactive proxy never tries to walk the
+// object's properties, eliminating both the TDZ and the proxy overhead.
+const IconFiles       = markRaw(Files)
+const IconPicture     = markRaw(Picture)
+const IconFilm        = markRaw(Film)
+const IconMicrophone  = markRaw(Microphone)
+const IconUpload      = markRaw(Upload)
+const IconUploadFilled = markRaw(UploadFilled)
+const IconDelete      = markRaw(Delete)
+const IconDownload    = markRaw(Download)
+const IconVideoPlay   = markRaw(VideoPlay)
+const IconHeadset     = markRaw(Headset)
+
 const filterTabs = [
-  { value: 'all',   label: '全部', icon: markRaw(Files)      },
-  { value: 'image', label: '图片', icon: markRaw(Picture)    },
-  { value: 'video', label: '视频', icon: markRaw(Film)       },
-  { value: 'audio', label: '音频', icon: markRaw(Microphone) },
+  { value: 'all',   label: '全部', icon: IconFiles      },
+  { value: 'image', label: '图片', icon: IconPicture    },
+  { value: 'video', label: '视频', icon: IconFilm       },
+  { value: 'audio', label: '音频', icon: IconMicrophone },
 ]
 const activeFilter = ref('all')
 
@@ -225,7 +239,14 @@ const emptyDescription = computed(() => {
   return labels[activeFilter.value] || '暂无素材'
 })
 
-onMounted(fetchItems)
+// ── Lifecycle & watchers ───────────────────────────────────────────────────
+// IMPORTANT: use arrow-wrapper `() => fetchItems()` instead of passing
+// fetchItems directly.  In the production build (strict mode) `onMounted`
+// evaluates its argument immediately; if `const fetchItems` is declared
+// below this call site, accessing it causes a Temporal Dead Zone error.
+// The arrow wrapper defers the reference until the hook actually fires,
+// by which point all declarations in setup() have been initialised.
+onMounted(() => fetchItems())
 
 watch(activeFilter, () => {
   page.value = 1

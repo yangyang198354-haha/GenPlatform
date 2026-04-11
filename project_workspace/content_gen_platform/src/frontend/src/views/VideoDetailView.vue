@@ -125,7 +125,11 @@ const loadProject = async () => {
 
 const connectWebSocket = () => {
   const token = auth.accessToken
-  ws = new WebSocket(`ws://${location.host}/ws/notifications/`)
+  // Pass JWT token as query param — WebSocket cannot carry HTTP headers.
+  const wsUrl = token
+    ? `ws://${location.host}/ws/notifications/?token=${token}`
+    : `ws://${location.host}/ws/notifications/`
+  ws = new WebSocket(wsUrl)
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data)
     if (msg.event_type === 'video_progress' && msg.payload.project_id === project.value.id) {

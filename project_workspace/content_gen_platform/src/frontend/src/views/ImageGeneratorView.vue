@@ -203,7 +203,14 @@ const loadHistory = async () => {
 }
 
 const connectWebSocket = () => {
-  ws = new WebSocket(`ws://${location.host}/ws/notifications/`)
+  // Pass JWT access token as query param — WebSocket connections cannot
+  // include HTTP headers (no Authorization: Bearer), so the token must be
+  // embedded in the URL.  The backend JwtAuthMiddleware reads ?token=...
+  const token = auth.accessToken
+  const wsUrl = token
+    ? `ws://${location.host}/ws/notifications/?token=${token}`
+    : `ws://${location.host}/ws/notifications/`
+  ws = new WebSocket(wsUrl)
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data)
     if (msg.event_type === 'image_progress' && msg.payload.request_id === activeRequestId.value) {
