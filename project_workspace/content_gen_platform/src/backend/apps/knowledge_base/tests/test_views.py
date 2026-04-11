@@ -174,3 +174,175 @@ class TestDocumentDetailView:
         resp = client2.delete(_make_url(doc.pk))
         assert resp.status_code == status.HTTP_404_NOT_FOUND
         assert Document.objects.filter(pk=doc.pk).exists()
+
+
+# ── End-to-end chain: upload → Celery task → DocumentChunks in DB ─────────
+
+@pytest.mark.django_db
+class TestUploadToVectorChainIntegration:
+    """
+    Full pipeline integration test:
+        POST /api/v1/knowledge/documents/
+            → Document created (status=processing)
+            → process_document_task fired (ALWAYS_EAGER → runs synchronously)
+            → _extract_text called on the uploaded file
+            → _chunk_text splits the text
+            → _get_embedding_model mock returns 512-dim vectors
+            → DocumentChunk rows bulk-created in the database
+            → Document status updated to 'available'
+
+    This test is the only one that verifies the COMPLETE chain without
+    mocking the Celery task itself.  All previous tests either mock the
+    task or test individual services in isolation.
+    """
+
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_upload_txt_creates_chunks_in_db(self, mock_get_model, auth_client, settings, tmp_path):
+        """
+        Uploading a .txt file triggers Celery (ALWAYS_EAGER), which runs
+        process_document() synchronously.  After the request returns,
+        DocumentChunk rows must exist in the database.
+        """
+        import numpy as np
+        from unittest.mock import MagicMock
+
+        mock_model = MagicMock()
+        # encode() is called with a list of chunk strings; return one 512-dim
+        # vector per chunk (shape = [n_chunks, 512])
+        def fake_encode(texts, **kwargs):
+            return np.zeros((len(texts), 512), dtype="float32")
+        mock_model.encode.side_effect = fake_encode
+        mock_get_model.return_value = mock_model
+
+        settings.MEDIA_ROOT = str(tmp_path)
+        settings.MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024
+
+        client, user = auth_client
+        content = b"This is a test document with enough words to produce at least one chunk."
+        f = io.BytesIO(content)
+        f.name = "chain_test.txt"
+        f.size = len(content)
+
+        resp = client.post(DOCS_URL, {"file": f}, format="multipart")
+
+        assert resp.status_code == status.HTTP_201_CREATED
+        doc_id = resp.data["id"]
+
+        # After CELERY_TASK_ALWAYS_EAGER the task has already run
+        doc = Document.objects.get(pk=doc_id)
+        assert doc.status == "available", (
+            f"Expected status='available' after eager task, got '{doc.status}'. "
+            f"error_message={doc.error_message!r}"
+        )
+        assert doc.chunk_count >= 1
+
+        from apps.knowledge_base.models import DocumentChunk
+        chunks = DocumentChunk.objects.filter(document=doc)
+        assert chunks.exists(), "At least one DocumentChunk must be created after processing."
+        assert chunks.count() == doc.chunk_count
+
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_upload_md_creates_chunks_in_db(self, mock_get_model, auth_client, settings, tmp_path):
+        """Markdown file upload goes through the full chain successfully."""
+        import numpy as np
+        from unittest.mock import MagicMock
+
+        mock_model = MagicMock()
+        mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
+        mock_get_model.return_value = mock_model
+
+        settings.MEDIA_ROOT = str(tmp_path)
+        settings.MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024
+
+        client, _ = auth_client
+        content = b"# Title\n\nThis is markdown content with **bold** and _italic_ text."
+        f = io.BytesIO(content)
+        f.name = "readme.md"
+        f.size = len(content)
+
+        resp = client.post(DOCS_URL, {"file": f}, format="multipart")
+        assert resp.status_code == status.HTTP_201_CREATED
+
+        doc = Document.objects.get(pk=resp.data["id"])
+        assert doc.status == "available"
+
+        from apps.knowledge_base.models import DocumentChunk
+        assert DocumentChunk.objects.filter(document=doc).exists()
+
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_uploaded_chunks_have_correct_embedding_dimension(
+        self, mock_get_model, auth_client, settings, tmp_path
+    ):
+        """
+        Regression for be2ab07: after migrating from bge-m3 (1024-dim) to
+        bge-small-zh-v1.5 (512-dim), stored embeddings must be 512-dimensional.
+        """
+        import numpy as np
+        from unittest.mock import MagicMock
+
+        mock_model = MagicMock()
+        mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
+        mock_get_model.return_value = mock_model
+
+        settings.MEDIA_ROOT = str(tmp_path)
+        settings.MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024
+
+        client, _ = auth_client
+        content = b"Dimension regression test content for pgvector chunk storage."
+        f = io.BytesIO(content)
+        f.name = "dim_test.txt"
+        f.size = len(content)
+
+        resp = client.post(DOCS_URL, {"file": f}, format="multipart")
+        assert resp.status_code == status.HTTP_201_CREATED
+
+        from apps.knowledge_base.models import DocumentChunk
+        chunk = DocumentChunk.objects.filter(
+            document_id=resp.data["id"]
+        ).first()
+        assert chunk is not None
+        assert len(chunk.embedding) == 512, (
+            f"Expected 512-dim embedding (bge-small-zh-v1.5), got {len(chunk.embedding)}. "
+            "Possible regression of be2ab07."
+        )
+
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_chain_after_upload_then_search_returns_chunk(
+        self, mock_get_model, auth_client, settings, tmp_path
+    ):
+        """
+        Full round-trip: upload → process → search.
+        After a document is processed the search() function must be able
+        to find its chunks via vector similarity.
+        """
+        import numpy as np
+        from unittest.mock import MagicMock
+        from apps.knowledge_base.services import search
+
+        # Fixed vector so both storage and query use the same direction
+        fixed_vec = np.ones(512, dtype="float32") * 0.5
+
+        mock_model = MagicMock()
+        mock_model.encode.side_effect = lambda texts, **kw: np.tile(fixed_vec, (len(texts), 1))
+        mock_get_model.return_value = mock_model
+
+        settings.MEDIA_ROOT = str(tmp_path)
+        settings.MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024
+
+        client, user = auth_client
+        content = b"Unique searchable content about knowledge retrieval."
+        f = io.BytesIO(content)
+        f.name = "search_test.txt"
+        f.size = len(content)
+
+        resp = client.post(DOCS_URL, {"file": f}, format="multipart")
+        assert resp.status_code == status.HTTP_201_CREATED
+
+        doc = Document.objects.get(pk=resp.data["id"])
+        assert doc.status == "available"
+
+        # Now search — mock returns the same vector for the query
+        results = search(user.pk, "knowledge retrieval", top_k=3)
+        assert results, "search() must find at least one chunk after the document was processed."
+        assert any("knowledge" in r.content.lower() or "retrieval" in r.content.lower()
+                   for r in results)
