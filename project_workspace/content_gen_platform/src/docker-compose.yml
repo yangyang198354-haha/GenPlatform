@@ -39,8 +39,16 @@ services:
       REDIS_URL: redis://redis:6379/0
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost}
+      # HuggingFace mirror — same as celery_worker so model downloads work
+      # behind GFW.  Without this the web worker would try huggingface.co
+      # (blocked), hang for minutes, and trigger a 504 Gateway Timeout.
+      HF_ENDPOINT: https://hf-mirror.com
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
     volumes:
       - media_data:/app/media
+      # Share the model cache with celery_worker so the embedding model
+      # only needs to be downloaded once (by whichever service starts first).
+      - model_cache:/root/.cache/huggingface
     depends_on:
       db:
         condition: service_healthy

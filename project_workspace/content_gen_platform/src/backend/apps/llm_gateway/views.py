@@ -2,6 +2,7 @@
 import json
 import logging
 import asyncio
+import concurrent.futures
 
 from django.conf import settings
 from django.http import StreamingHttpResponse
@@ -12,6 +13,12 @@ from rest_framework import status
 from core.encryption import decrypt
 from apps.settings_vault.models import UserServiceConfig
 from .providers import get_provider
+
+# How long (seconds) to wait for KB search before giving up and continuing
+# without context.  KB search loads a ~400 MB embedding model on first call;
+# if the model isn't warmed yet we skip context rather than hanging the whole
+# request and triggering nginx's proxy_read_timeout (504).
+_KB_SEARCH_TIMEOUT_SECONDS = 8
 
 
 def _kb_search(user_id, query, top_k=3):
@@ -76,17 +83,27 @@ class GenerateContentView(APIView):
             return Response({"error": f"LLM 配置加载失败：{e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Build context from knowledge base
+        # Use a hard timeout so that a slow first-load of the embedding model
+        # (or any other KB issue) never blocks the whole SSE request.
         context_parts = []
         used_doc_ids = []
         if use_kb and "apps.knowledge_base" in settings.INSTALLED_APPS:
             try:
-                chunks = _kb_search(request.user.pk, prompt, top_k=3)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    future = pool.submit(_kb_search, request.user.pk, prompt, top_k=3)
+                    chunks = future.result(timeout=_KB_SEARCH_TIMEOUT_SECONDS)
                 for chunk in chunks:
                     context_parts.append(chunk.content)
                     if chunk.document_id not in used_doc_ids:
                         used_doc_ids.append(chunk.document_id)
+            except concurrent.futures.TimeoutError:
+                logger.warning(
+                    "KB search timed out after %ss (model still loading?), "
+                    "continuing without context",
+                    _KB_SEARCH_TIMEOUT_SECONDS,
+                )
             except Exception:
-                logger.warning("KB search failed, continuing without context")
+                logger.warning("KB search failed, continuing without context", exc_info=True)
 
         # Build messages
         system_prompt = PLATFORM_SYSTEM_PROMPTS.get(platform, PLATFORM_SYSTEM_PROMPTS["general"])
@@ -104,32 +121,6 @@ class GenerateContentView(APIView):
             {"role": "user", "content": f"{prompt}\n\n{word_instruction}".strip()},
         ]
 
-        def sse_stream():
-            """Synchronous generator wrapping async stream for Django."""
-            loop = asyncio.new_event_loop()
-            try:
-                async def collect():
-                    async for token in provider.stream_chat(messages):
-                        yield token
-
-                async def run():
-                    async for token in collect():
-                        yield f"data: {json.dumps({'token': token, 'done': False})}\n\n"
-                    # Send metadata on completion
-                    yield f"data: {json.dumps({'done': True, 'used_doc_ids': used_doc_ids})}\n\n"
-
-                for chunk in loop.run_until_complete(_drain_async(run())):
-                    yield chunk
-            finally:
-                loop.close()
-
-        async def _drain_async(agen):
-            results = []
-            async for item in agen:
-                results.append(item)
-            return results
-
-        # Use a cleaner sync approach via sync_to_async
         response = StreamingHttpResponse(
             _sync_sse_generator(provider, messages, used_doc_ids),
             content_type="text/event-stream",
