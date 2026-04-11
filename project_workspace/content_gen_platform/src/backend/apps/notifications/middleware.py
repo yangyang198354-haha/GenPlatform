@@ -24,7 +24,11 @@ import logging
 from urllib.parse import parse_qs
 
 from channels.db import database_sync_to_async
-from django.contrib.auth.models import AnonymousUser
+
+# NOTE: Do NOT import Django models (AnonymousUser, User, etc.) at module level.
+# asgi.py is loaded before Django's app registry is ready, so any top-level
+# Django model import raises AppRegistryNotReady.  All model/auth imports must
+# happen inside functions (lazy import pattern).
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +36,13 @@ logger = logging.getLogger(__name__)
 @database_sync_to_async
 def _get_user_from_token(token_str: str):
     """Validate JWT access token and return the User or AnonymousUser."""
-    try:
-        from rest_framework_simplejwt.tokens import AccessToken
-        from django.contrib.auth import get_user_model
+    # Lazy imports — app registry is guaranteed to be ready inside a function
+    # called at request time, but NOT at module import time.
+    from django.contrib.auth.models import AnonymousUser  # noqa: PLC0415
+    from rest_framework_simplejwt.tokens import AccessToken  # noqa: PLC0415
+    from django.contrib.auth import get_user_model          # noqa: PLC0415
 
+    try:
         token = AccessToken(token_str)
         user_id = token.get("user_id")
         if not user_id:
@@ -69,6 +76,8 @@ class JwtAuthMiddleware:
             if token_str:
                 scope["user"] = await _get_user_from_token(token_str)
             else:
+                # Lazy import — same reason as _get_user_from_token above
+                from django.contrib.auth.models import AnonymousUser  # noqa: PLC0415
                 scope["user"] = AnonymousUser()
 
         return await self.inner(scope, receive, send)
