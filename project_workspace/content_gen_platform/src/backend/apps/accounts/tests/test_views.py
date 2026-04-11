@@ -67,6 +67,73 @@ class TestRegisterView:
 
 
 @pytest.mark.django_db
+class TestRegisterPasswordValidation:
+    """
+    Regression tests for fix(register) commit ba99fe3.
+
+    Before the fix the serializer did not include a password2 field in the
+    proper write_only manner; mismatched passwords or missing password2 could
+    either crash or silently succeed.  Also validates that Django's built-in
+    password validators (CommonPasswordValidator, NumericPasswordValidator)
+    are wired in via validate_password.
+    """
+
+    def test_missing_password2_returns_400(self, api_client):
+        """Omitting password2 entirely must be rejected with 400."""
+        resp = api_client.post(REGISTER_URL, {
+            "username": "newuser",
+            "email": "new@example.com",
+            "password": "StrongPass123!",
+            # password2 intentionally absent
+        })
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_all_numeric_password_rejected(self, api_client):
+        """Django NumericPasswordValidator must reject all-digit passwords."""
+        resp = api_client.post(REGISTER_URL, {
+            "username": "numericuser",
+            "email": "numeric@example.com",
+            "password": "12345678",
+            "password2": "12345678",
+        })
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_too_short_password_rejected(self, api_client):
+        """Password shorter than 8 characters must be rejected."""
+        resp = api_client.post(REGISTER_URL, {
+            "username": "shortpass",
+            "email": "short@example.com",
+            "password": "Ab1!",
+            "password2": "Ab1!",
+        })
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_password2_not_returned_in_response(self, api_client):
+        """password and password2 are write_only — they must never appear in response."""
+        resp = api_client.post(REGISTER_URL, {
+            "username": "safeuser",
+            "email": "safe@example.com",
+            "password": "StrongPass123!",
+            "password2": "StrongPass123!",
+        })
+        assert resp.status_code == status.HTTP_201_CREATED
+        assert "password" not in resp.data
+        assert "password2" not in resp.data
+
+    def test_password_mismatch_error_key_is_password(self, api_client):
+        """Mismatch error must be keyed under 'password' (not 'non_field_errors')."""
+        resp = api_client.post(REGISTER_URL, {
+            "username": "mismatch",
+            "email": "mismatch@example.com",
+            "password": "StrongPass123!",
+            "password2": "Different123!",
+        })
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        # Error must be keyed under 'password' per the serializer validate() impl
+        assert "password" in resp.data
+
+
+@pytest.mark.django_db
 class TestLoginView:
     def test_login_success(self, api_client, user):
         resp = api_client.post(LOGIN_URL, {"email": user.email, "password": "TestPass123!"})
