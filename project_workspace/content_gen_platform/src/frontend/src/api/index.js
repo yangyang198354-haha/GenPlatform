@@ -20,6 +20,33 @@ api.interceptors.request.use((config) => {
 });
 
 // Response interceptor: handle 401 with token refresh
+//
+// Problem: when multiple requests fire concurrently and the access token has
+// just expired, all of them receive 401 simultaneously.  Without a lock each
+// request would independently call refreshToken(), but because the backend
+// uses ROTATE_REFRESH_TOKENS=True the first successful refresh invalidates the
+// refresh token — every subsequent refresh attempt fails with 401 and the user
+// is logged out unexpectedly.
+//
+// Solution: a single shared Promise (_refreshPromise) acts as a mutex.
+// While a refresh is in flight every waiting request queues itself; once the
+// new token arrives they all replay their original requests.
+let _refreshPromise = null;
+
+/**
+ * Shared token-refresh mutex.
+ * Call this instead of auth.refreshToken() directly so that concurrent callers
+ * (response interceptor AND App.vue onMounted proactive refresh) never race.
+ */
+export function ensureTokenRefreshed(auth) {
+  if (!_refreshPromise) {
+    _refreshPromise = auth.refreshToken().finally(() => {
+      _refreshPromise = null;
+    });
+  }
+  return _refreshPromise;
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -28,7 +55,7 @@ api.interceptors.response.use(
       originalRequest._retry = true;
       try {
         const auth = useAuthStore();
-        await auth.refreshToken();
+        await ensureTokenRefreshed(auth);
         originalRequest.headers.Authorization = `Bearer ${auth.accessToken}`;
         return api(originalRequest);
       } catch {

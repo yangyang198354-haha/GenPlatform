@@ -26,6 +26,12 @@ export const useAuthStore = defineStore('auth', {
       const { data } = await authAPI.refreshToken(this.refreshTokenVal)
       this.accessToken = data.access
       localStorage.setItem('access_token', data.access)
+      // ROTATE_REFRESH_TOKENS=True: backend issues a new refresh token each time.
+      // Must persist it or the next refresh will use a blacklisted token → instant logout.
+      if (data.refresh) {
+        this.refreshTokenVal = data.refresh
+        localStorage.setItem('refresh_token', data.refresh)
+      }
     },
 
     async fetchProfile() {
