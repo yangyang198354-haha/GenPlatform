@@ -160,6 +160,69 @@ REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = []
 
 ---
 
+## SD-L012: JWT 刷新 — ROTATE_REFRESH_TOKENS=True 时必须保存新 refresh token
+
+**日期**: 2026-04-11  
+**文件**: `src/frontend/src/stores/auth.js`, `src/frontend/src/api/index.js`
+
+**问题**: 后端 `ROTATE_REFRESH_TOKENS=True` 时，每次刷新 access token 同时
+返回一个新的 refresh token（旧的被加入黑名单）。但 `auth.js` 的 `refreshToken()`
+只保存了 `data.access`，忽略了 `data.refresh`。
+
+**后果**: 15 分钟后（access token 再次过期），store 用的仍是旧的（已黑名单）
+refresh token 刷新 → 后端返回 401 → 用户被强制退出。
+
+**修复**:
+```js
+async refreshToken() {
+  const { data } = await authAPI.refreshToken(this.refreshTokenVal)
+  this.accessToken = data.access
+  localStorage.setItem('access_token', data.access)
+  // 必须保存轮换后的新 refresh token！
+  if (data.refresh) {
+    this.refreshTokenVal = data.refresh
+    localStorage.setItem('refresh_token', data.refresh)
+  }
+},
+```
+
+---
+
+## SD-L013: JWT 刷新 — 并发 401 必须用 Promise 互斥锁
+
+**日期**: 2026-04-11  
+**文件**: `src/frontend/src/api/index.js`, `src/frontend/src/App.vue`
+
+**问题**: 页面同时有多个 API 请求，access token 刚好过期 → 全部收到 401 →
+拦截器各自独立调用 `refreshToken()` → N 次并发刷新。
+
+在 `ROTATE_REFRESH_TOKENS=True` 下，第一个刷新成功后旧 token 被黑名单，
+后续刷新都返回 401 → 用户被退出登录（俗称"401 风暴"）。
+
+**修复**: 用 `_refreshPromise` 变量实现互斥锁——刷新进行中时所有并发调用
+共享同一个 Promise，避免多次请求：
+
+```js
+let _refreshPromise = null;
+
+export function ensureTokenRefreshed(auth) {
+  if (!_refreshPromise) {
+    _refreshPromise = auth.refreshToken().finally(() => {
+      _refreshPromise = null;
+    });
+  }
+  return _refreshPromise;
+}
+
+// 拦截器中用 ensureTokenRefreshed(auth) 代替 auth.refreshToken()
+// App.vue onMounted 的主动刷新也必须走同一个函数，防止与拦截器竞争
+```
+
+**原则**: 任何地方需要刷新 token，一律通过 `ensureTokenRefreshed()` 调用，
+不直接调用 `auth.refreshToken()`。
+
+---
+
 ## SD-L009: Celery 队列路由 — CELERY_TASK_DEFAULT_QUEUE 必须与 worker -Q 对齐
 
 **日期**: 2026-04-11  
