@@ -3,7 +3,7 @@ import os
 import pytest
 import numpy as np
 from unittest.mock import patch, MagicMock
-from apps.knowledge_base.services import _chunk_text, _extract_text, process_document, search
+from apps.knowledge_base.services import _chunk_text, _extract_text, _ocr_pdf, process_document, search
 from apps.knowledge_base.models import Document, DocumentChunk
 
 
@@ -169,6 +169,163 @@ class TestExtractText:
         pytest.importorskip("pypdf", reason="pypdf not installed")
         with pytest.raises(RuntimeError, match="PDF extraction failed"):
             _extract_text(str(tmp_path / "ghost.pdf"), "pdf")
+
+    # ── OCR fallback for scanned PDFs ──────────────────────────────────────
+
+    def test_extract_pdf_triggers_ocr_when_text_layer_empty(self, tmp_path):
+        """
+        A PDF whose every page has an empty text layer must trigger the OCR
+        fallback (_ocr_pdf).  We verify the dispatch logic without needing
+        real OCR binaries installed by patching _ocr_pdf.
+        """
+        pytest.importorskip("pypdf", reason="pypdf not installed")
+
+        # Build a minimal blank-page PDF (no text layer)
+        import pypdf
+        writer = pypdf.PdfWriter()
+        writer.add_blank_page(width=612, height=792)
+        path = tmp_path / "scanned.pdf"
+        with open(str(path), "wb") as f:
+            writer.write(f)
+
+        with patch("apps.knowledge_base.services._ocr_pdf", return_value="OCR result") as mock_ocr:
+            result = _extract_text(str(path), "pdf")
+
+        mock_ocr.assert_called_once_with(str(path))
+        assert result == "OCR result"
+
+    def test_extract_pdf_does_not_trigger_ocr_when_text_exists(self, tmp_path):
+        """
+        A PDF whose pages already have text must NOT invoke OCR —
+        unnecessary OCR adds latency and may degrade quality.
+        """
+        pytest.importorskip("pypdf", reason="pypdf not installed")
+
+        # Use a text-layer PDF (reportlab if available, else skip with a note)
+        reportlab = pytest.importorskip("reportlab", reason="reportlab not installed — skipping no-OCR test")
+        from reportlab.pdfgen import canvas as rl_canvas
+        path = tmp_path / "textual.pdf"
+        c = rl_canvas.Canvas(str(path))
+        c.drawString(100, 700, "Hello no OCR needed")
+        c.save()
+
+        with patch("apps.knowledge_base.services._ocr_pdf") as mock_ocr:
+            result = _extract_text(str(path), "pdf")
+
+        mock_ocr.assert_not_called()
+        assert "Hello no OCR needed" in result
+
+    def test_ocr_pdf_graceful_when_libraries_missing(self, tmp_path):
+        """
+        When pdf2image or pytesseract is not installed, _ocr_pdf must return
+        "" and log a warning instead of raising ImportError.
+        """
+        pytest.importorskip("pypdf", reason="pypdf not installed")
+        import pypdf
+        writer = pypdf.PdfWriter()
+        writer.add_blank_page(width=612, height=792)
+        path = tmp_path / "blank.pdf"
+        with open(str(path), "wb") as f:
+            writer.write(f)
+
+        # Simulate missing pdf2image
+        with patch.dict("sys.modules", {"pdf2image": None, "pytesseract": None}):
+            result = _ocr_pdf(str(path))
+
+        assert result == "", "When OCR libs are absent _ocr_pdf must return empty string, not crash."
+
+    def test_ocr_pdf_returns_text_when_available(self, tmp_path):
+        """
+        When OCR libraries are present, _ocr_pdf must return pytesseract's
+        output.  We mock both pdf2image and pytesseract so this test runs
+        without system binaries installed.
+        """
+        pytest.importorskip("pypdf", reason="pypdf not installed")
+        import pypdf
+        from unittest.mock import MagicMock
+
+        writer = pypdf.PdfWriter()
+        writer.add_blank_page(width=612, height=792)
+        path = tmp_path / "scanned2.pdf"
+        with open(str(path), "wb") as f:
+            writer.write(f)
+
+        fake_image = MagicMock()
+        mock_pdf2image = MagicMock()
+        mock_pdf2image.convert_from_path.return_value = [fake_image]
+
+        mock_pytesseract = MagicMock()
+        mock_pytesseract.image_to_string.return_value = "扫描识别的文字 OCR text"
+
+        with patch.dict("sys.modules", {
+            "pdf2image": mock_pdf2image,
+            "pytesseract": mock_pytesseract,
+        }):
+            result = _ocr_pdf(str(path))
+
+        mock_pdf2image.convert_from_path.assert_called_once_with(str(path), dpi=200)
+        mock_pytesseract.image_to_string.assert_called_once_with(
+            fake_image, lang="chi_sim+eng"
+        )
+        assert "扫描识别的文字 OCR text" in result
+
+    def test_ocr_pdf_uses_chi_sim_and_eng_language(self, tmp_path):
+        """
+        OCR must be called with lang='chi_sim+eng' to support both
+        Simplified Chinese and English content in the same document.
+        """
+        pytest.importorskip("pypdf", reason="pypdf not installed")
+        import pypdf
+        from unittest.mock import MagicMock
+
+        writer = pypdf.PdfWriter()
+        writer.add_blank_page(width=612, height=792)
+        path = tmp_path / "lang_test.pdf"
+        with open(str(path), "wb") as f:
+            writer.write(f)
+
+        fake_image = MagicMock()
+        mock_pdf2image = MagicMock()
+        mock_pdf2image.convert_from_path.return_value = [fake_image]
+        mock_pytesseract = MagicMock()
+        mock_pytesseract.image_to_string.return_value = "text"
+
+        with patch.dict("sys.modules", {
+            "pdf2image": mock_pdf2image,
+            "pytesseract": mock_pytesseract,
+        }):
+            _ocr_pdf(str(path))
+
+        _, kwargs = mock_pytesseract.image_to_string.call_args
+        assert kwargs.get("lang") == "chi_sim+eng", (
+            "Tesseract must use lang='chi_sim+eng' for Chinese+English documents."
+        )
+
+    def test_ocr_pdf_uses_200_dpi(self, tmp_path):
+        """DPI=200 must be used — lower values cause recognition errors."""
+        pytest.importorskip("pypdf", reason="pypdf not installed")
+        import pypdf
+        from unittest.mock import MagicMock
+
+        writer = pypdf.PdfWriter()
+        writer.add_blank_page(width=612, height=792)
+        path = tmp_path / "dpi_test.pdf"
+        with open(str(path), "wb") as f:
+            writer.write(f)
+
+        mock_pdf2image = MagicMock()
+        mock_pdf2image.convert_from_path.return_value = [MagicMock()]
+        mock_pytesseract = MagicMock()
+        mock_pytesseract.image_to_string.return_value = ""
+
+        with patch.dict("sys.modules", {
+            "pdf2image": mock_pdf2image,
+            "pytesseract": mock_pytesseract,
+        }):
+            _ocr_pdf(str(path))
+
+        _, kwargs = mock_pdf2image.convert_from_path.call_args
+        assert kwargs.get("dpi") == 200, "pdf2image must convert at DPI=200."
 
 
 # ── process_document ───────────────────────────────────────────────────────

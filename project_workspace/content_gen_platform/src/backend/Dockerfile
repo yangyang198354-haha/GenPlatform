@@ -1,10 +1,18 @@
 FROM python:3.11-slim
 
 # System dependencies
+# poppler-utils   — required by pdf2image to convert PDF pages to images
+# tesseract-ocr   — OCR engine used by pytesseract
+# tesseract-ocr-chi-sim — Simplified Chinese language data for Tesseract
+# tesseract-ocr-eng     — English language data (usually bundled but explicit)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     ffmpeg \
+    poppler-utils \
+    tesseract-ocr \
+    tesseract-ocr-chi-sim \
+    tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -28,23 +28,80 @@ def _get_embedding_model() -> "SentenceTransformer":
     return _embedding_model
 
 
+def _ocr_pdf(file_path: str) -> str:
+    """
+    OCR fallback for scanned PDFs (no embedded text layer).
+
+    Converts each PDF page to a raster image via pdf2image (wraps poppler),
+    then runs pytesseract to extract text.  Both libraries must be installed
+    AND the corresponding system binaries must be present:
+      - poppler-utils  (for pdf2image / pdftoppm)
+      - tesseract-ocr + tesseract-ocr-chi-sim + tesseract-ocr-eng
+        (for pytesseract)
+
+    If either library is missing the function logs a warning and returns ""
+    so the caller can surface a meaningful empty result rather than crashing.
+    """
+    try:
+        from pdf2image import convert_from_path   # noqa: PLC0415
+        import pytesseract                        # noqa: PLC0415
+    except ImportError as exc:
+        logger.warning(
+            "OCR unavailable for scanned PDF '%s': %s — "
+            "install pdf2image, pytesseract, and system packages "
+            "poppler-utils + tesseract-ocr + tesseract-ocr-chi-sim",
+            file_path, exc,
+        )
+        return ""
+
+    try:
+        # DPI=200: good balance between accuracy and memory for A4 pages.
+        # lang="chi_sim+eng": mixed Chinese/English documents are common.
+        images = convert_from_path(file_path, dpi=200)
+        texts = [
+            pytesseract.image_to_string(img, lang="chi_sim+eng")
+            for img in images
+        ]
+        return "\n".join(t for t in texts if t.strip())
+    except Exception as exc:
+        raise RuntimeError(f"PDF OCR failed: {exc}") from exc
+
+
 def _extract_text(file_path: str, file_type: str) -> str:
-    """Extract plain text from a document file."""
+    """Extract plain text from a document file.
+
+    For PDF files the extraction is two-stage:
+      1. Try pypdf's text-layer extraction (fast, zero extra dependencies).
+      2. If every page returns empty text (i.e. the file is a scanned /
+         image-only PDF), fall back to OCR via pdf2image + pytesseract.
+    """
     path = Path(file_path)
     if file_type == "txt" or file_type == "md":
         return path.read_text(encoding="utf-8", errors="replace")
 
     if file_type == "pdf":
         try:
-            import pypdf
+            import pypdf  # noqa: PLC0415
             reader = pypdf.PdfReader(str(path))
-            return "\n".join(page.extract_text() or "" for page in reader.pages)
+            pages_text = [page.extract_text() or "" for page in reader.pages]
+            text = "\n".join(pages_text)
+
+            # If all pages have no text it is almost certainly a scanned PDF.
+            # Fall back to OCR so users get content instead of an empty chunk.
+            if not text.strip():
+                logger.info(
+                    "PDF '%s' has no embedded text layer — falling back to OCR",
+                    file_path,
+                )
+                text = _ocr_pdf(file_path)
+
+            return text
         except Exception as e:
             raise RuntimeError(f"PDF extraction failed: {e}") from e
 
     if file_type == "docx":
         try:
-            import docx
+            import docx  # noqa: PLC0415
             doc = docx.Document(str(path))
             texts = [p.text for p in doc.paragraphs if p.text.strip()]
             for table in doc.tables:
