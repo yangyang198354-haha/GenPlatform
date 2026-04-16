@@ -105,6 +105,46 @@ class TestProcessDocumentTaskFallback:
         # Should not raise — _process_document handles missing docs internally.
         process_document_task(99999)
 
+    def test_soft_time_limit_exceeded_marks_doc_error(self, user, tmp_path, db):
+        """
+        Regression: SoftTimeLimitExceeded must set status='error' with a user-visible
+        message instead of leaving the document stuck at 'processing' forever.
+
+        Root cause scenario: Celery raises SoftTimeLimitExceeded when the task exceeds
+        soft_time_limit seconds (e.g. model loading hangs, or encoding a huge DOCX).
+        Without an explicit handler this exception escapes all Python error handlers
+        and the document stays in 'processing' indefinitely.
+        """
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        doc = _make_doc(user, tmp_path)
+
+        with patch(
+            "apps.knowledge_base.tasks._process_document",
+            side_effect=SoftTimeLimitExceeded(),
+        ):
+            process_document_task(doc.pk)
+
+        doc.refresh_from_db()
+        assert doc.status == "error", (
+            "SoftTimeLimitExceeded must transition the document to status='error'. "
+            "Without this, a timed-out task leaves the document stuck at 'processing'."
+        )
+        assert doc.error_message, "error_message must be non-empty so the user sees an explanation"
+
+    def test_soft_time_limit_exceeded_does_not_raise(self, user, tmp_path, db):
+        """Task must swallow SoftTimeLimitExceeded rather than propagating it."""
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        doc = _make_doc(user, tmp_path)
+
+        # Must not raise — task should handle the exception internally
+        with patch(
+            "apps.knowledge_base.tasks._process_document",
+            side_effect=SoftTimeLimitExceeded(),
+        ):
+            process_document_task(doc.pk)  # should complete without raising
+
     def test_fallback_does_not_retry(self, user, tmp_path, db):
         """On unexpected exception the task must NOT call self.retry()."""
         doc = _make_doc(user, tmp_path)

@@ -142,7 +142,11 @@ def process_document(document_id: int) -> None:
         chunks = _chunk_text(text, settings.CHUNK_SIZE, settings.CHUNK_OVERLAP)
 
         model = _get_embedding_model()
-        embeddings = model.encode(chunks, show_progress_bar=False, normalize_embeddings=True)
+        # batch_size=32 caps peak RAM: encoding all chunks at once can OOM
+        # the worker when processing large documents (especially DOCX/PDF).
+        embeddings = model.encode(
+            chunks, batch_size=32, show_progress_bar=False, normalize_embeddings=True
+        )
 
         # Delete existing chunks (re-processing case)
         DocumentChunk.objects.filter(document=doc).delete()

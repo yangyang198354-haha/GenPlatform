@@ -393,6 +393,58 @@ class TestProcessDocument:
         second_count = DocumentChunk.objects.filter(document=doc).count()
         assert second_count == first_count  # same count, not doubled
 
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_process_document_docx_success(self, mock_get_model, user, tmp_path):
+        """
+        Regression: DOCX documents must reach status='available' after processing.
+
+        Before the fix, large DOCX files could trigger OOM kill of the Celery worker
+        (because model.encode() was called without batch_size, holding all chunk
+        tensors in RAM at once).  The worker being SIGKILL'd bypasses Python exception
+        handlers, leaving the document stuck at status='processing' forever.
+
+        This test exercises the full process_document() pipeline with a real DOCX file
+        (created via python-docx) to catch any DOCX-specific code path regressions.
+        """
+        docx_mod = pytest.importorskip("docx", reason="python-docx not installed")
+
+        # Build a minimal DOCX with paragraphs and a table
+        word_doc = docx_mod.Document()
+        word_doc.add_paragraph("第一段：本文件用于知识库单元测试。")
+        word_doc.add_paragraph("第二段：Word 文档应当正确提取段落文本。")
+        table = word_doc.add_table(rows=2, cols=2)
+        table.cell(0, 0).text = "表头A"
+        table.cell(0, 1).text = "表头B"
+        table.cell(1, 0).text = "单元格1"
+        table.cell(1, 1).text = "单元格2"
+        docx_path = tmp_path / "test_kb.docx"
+        word_doc.save(str(docx_path))
+
+        mock_model = MagicMock()
+        mock_model.encode.return_value = np.zeros((1, 512), dtype="float32")
+        mock_get_model.return_value = mock_model
+
+        doc = Document.objects.create(
+            user=user,
+            name="test_kb.docx",
+            original_filename="test_kb.docx",
+            file_path=str(docx_path),
+            file_size_bytes=docx_path.stat().st_size,
+            file_type="docx",
+            status="processing",
+        )
+
+        process_document(doc.pk)
+
+        doc.refresh_from_db()
+        assert doc.status == "available", (
+            f"DOCX document must reach status='available', got '{doc.status}'. "
+            f"error_message={doc.error_message!r}. "
+            "Possible regression: DOCX extraction path not covered by process_document()."
+        )
+        assert doc.chunk_count >= 1, "DOCX with content must produce at least 1 chunk"
+        assert doc.error_message == ""
+
     def test_process_document_not_found(self):
         # Should not raise; logs error and returns
         process_document(99999)  # nonexistent ID
