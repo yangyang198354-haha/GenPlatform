@@ -87,8 +87,9 @@ class TestDocumentListCreateView:
         # user1 should only see their own doc
         resp = client1.get(DOCS_URL)
         assert resp.status_code == status.HTTP_200_OK
-        assert len(resp.data) == 1
-        assert resp.data[0]["original_filename"] == "a.txt"
+        results = resp.data.get("results", resp.data)
+        assert len(results) == 1
+        assert results[0]["original_filename"] == "a.txt"
 
     @patch("apps.knowledge_base.views.process_document_task")
     def test_search_documents(self, mock_task, auth_client, settings, tmp_path):
@@ -101,8 +102,9 @@ class TestDocumentListCreateView:
 
         resp = client.get(DOCS_URL + "?search=alpha")
         assert resp.status_code == status.HTTP_200_OK
-        assert len(resp.data) == 1
-        assert "alpha" in resp.data[0]["name"]
+        results = resp.data.get("results", resp.data)
+        assert len(results) == 1
+        assert "alpha" in results[0]["name"]
 
     def test_list_unauthenticated(self, api_client):
         resp = api_client.get(DOCS_URL)
