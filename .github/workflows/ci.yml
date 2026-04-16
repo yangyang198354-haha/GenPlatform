@@ -63,23 +63,15 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     env:
-      DJANGO_SETTINGS_MODULE: config.settings.development
+      # config.settings.test extends development with:
+      #   CELERY_TASK_ALWAYS_EAGER=True, LocMemCache (no Redis), throttling disabled
+      DJANGO_SETTINGS_MODULE: config.settings.test
       POSTGRES_DB: test_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_HOST: localhost
       POSTGRES_PORT: "5432"
-      REDIS_URL: redis://localhost:6379/0
       ENCRYPTION_KEY: dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXQ=
       DJANGO_SECRET_KEY: ci-test-secret-key-not-for-production
     steps:
