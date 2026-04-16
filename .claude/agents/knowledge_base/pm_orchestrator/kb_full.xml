@@ -1,2 +1,86 @@
 <kb_entries agent_domain="pm_orchestrator" version="0.1.0">
+
+  <entry id="SD-L014" category="frontend" severity="critical" commit="64a1f41">
+    <title>Vue 3 + Vite 生产打包：icon 组件引用 TDZ 导致页面白屏</title>
+    <symptom>
+      生产构建后点击导航到某页面，控制台报 "ReferenceError: Cannot access 'B' before initialization"，
+      错误发生在 setup() 函数内，页面完全白屏。开发环境无此问题。
+    </symptom>
+    <root_cause>
+      两个叠加的 TDZ（Temporal Dead Zone）来源：
+
+      1. onMounted(fetchItems) 在 const fetchItems 声明之前求值。
+         JavaScript 在求值函数参数时立即访问变量。const 变量在声明之前处于 TDZ，
+         生产严格模式下直接抛出。开发模式下 Vite 的 HMR 运行时会对 const 做某些包装绕过此行为。
+
+      2. icon 组件对象（从 @element-plus/icons-vue 导入）在模板中作为 :icon="Upload" 等
+         prop 绑定使用，但未调用 markRaw()。Vite 生产打包时将这些组件重命名为单字母变量
+         (A, B, C...)，并可能因代码分割/tree-shaking 导致这些 const 声明出现在使用点之后，
+         触发 TDZ。
+    </root_cause>
+    <fix>
+      1. onMounted/onUnmounted 的函数参数改为箭头包装：
+           onMounted(() => fetchItems())   // 不是 onMounted(fetchItems)
+         箭头包装将引用推迟到 hook 实际触发时，届时 setup() 中所有声明已初始化。
+
+      2. 在 setup() 顶部、所有 ref/computed/lifecycle 调用之前，
+         为每个 icon 导入赋值到 markRaw 包装的具名常量：
+           const IconUpload = markRaw(Upload)
+           const IconDelete = markRaw(Delete)
+           // ...
+         然后在模板中使用 IconUpload 而不是 Upload。
+         markRaw() 加上 __v_skip 标志，Vue 的响应式代理不会遍历该对象，
+         消除了代理路径上的 TDZ 和性能开销。
+    </fix>
+    <prevention>
+      - 凡是 onMounted/watch/watchEffect 的第一个参数是 setup() 中稍后声明的 const，
+        必须用箭头包装。
+      - 凡是从第三方库导入的组件对象（尤其是 icon 库），用作任何绑定（:icon=, :is=,
+        slot content）时，统一在 setup() 顶部 markRaw() 处理。
+      - CI 应在生产构建后运行 E2E smoke test，覆盖所有导航路径，以便在部署前捕获此类错误。
+    </prevention>
+  </entry>
+
+  <entry id="SD-L015" category="backend" severity="high" commit="64a1f41">
+    <title>Django Channels WebSocket 403：AllowedHostsOriginValidator + JWT 认证缺失</title>
+    <symptom>
+      浏览器控制台报 "WebSocket connection to 'ws://IP/ws/notifications/' failed:
+      Error during WebSocket handshake: Unexpected response code: 403"。
+      所有实时功能（图片生成进度、视频生成进度）无法工作，降级为轮询。
+    </symptom>
+    <root_cause>
+      两个叠加的原因：
+
+      1. AllowedHostsOriginValidator 检查 WebSocket 握手的 Origin 头是否在 Django ALLOWED_HOSTS 中。
+         当用户通过 IP 地址直接访问时，Origin = "http://47.x.x.x"，若该 IP 未精确列入
+         ALLOWED_HOSTS 则返回 403。Nginx 已在上游做了 Host 校验，该中间件形成双重限制。
+
+      2. AuthMiddlewareStack 使用 Django session cookie 鉴权。前端使用 JWT Bearer Token，
+         无 session cookie。WebSocket 协议握手阶段无法携带 Authorization 头，导致
+         scope["user"] 始终为 AnonymousUser，consumer 关闭连接（code 4001）。
+    </root_cause>
+    <fix>
+      后端：
+      1. 从 asgi.py 移除 AllowedHostsOriginValidator（Nginx 已处理 Host 校验）。
+      2. 新建 apps/notifications/middleware.py，实现 JwtAuthMiddlewareStack：
+         - 从 URL query string 读取 ?token=&lt;access_token&gt;
+         - 用 simplejwt.AccessToken 验证并提取 user_id
+         - 将 User 对象写入 scope["user"]
+      3. asgi.py 使用 JwtAuthMiddlewareStack 替换 AuthMiddlewareStack。
+
+      前端（ImageGeneratorView, VideoDetailView）：
+         const wsUrl = token
+           ? `ws://${location.host}/ws/notifications/?token=${token}`
+           : `ws://${location.host}/ws/notifications/`
+         ws = new WebSocket(wsUrl)
+    </fix>
+    <prevention>
+      - JWT 应用中，所有 WebSocket 连接必须通过 query param 传 token，
+        不能依赖 session 或 cookie。
+      - AllowedHostsOriginValidator 仅在没有 Nginx/反向代理做 Host 检查时才有意义。
+        有代理层时应移除，避免误伤 IP 直访和非标准端口场景。
+      - WebSocket 鉴权应有集成测试覆盖（匿名连接 → 期望 4001，有效 token → 期望 accept）。
+    </prevention>
+  </entry>
+
 </kb_entries>
