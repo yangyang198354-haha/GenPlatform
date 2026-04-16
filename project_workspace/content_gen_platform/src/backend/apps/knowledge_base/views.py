@@ -193,8 +193,8 @@ class DocumentBatchUploadView(APIView):
                 "status": "processing",
             })
 
-        # If every file was skipped or rejected (none accepted), check why
-        if not accepted and not skipped and not rejected:
+        # If no files were successfully accepted, return 400
+        if not accepted:
             return Response(
                 {"error": "所选目录中未包含受支持的文档"},
                 status=status.HTTP_400_BAD_REQUEST,
