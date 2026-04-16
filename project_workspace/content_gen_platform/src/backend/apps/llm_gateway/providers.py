@@ -21,13 +21,22 @@ class BaseLLMProvider(ABC):
 
 
 class DeepSeekProvider(BaseLLMProvider):
-    def __init__(self, api_key: str, model: str = "deepseek-chat"):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "deepseek-chat",
+        temperature: float = 1.0,
+        max_tokens: int = 4096,
+    ):
         self.api_key = api_key
         self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
 
     async def stream_chat(
-        self, messages: list[dict], max_tokens: int = 2048
+        self, messages: list[dict], max_tokens: int | None = None
     ) -> AsyncGenerator[str, None]:
+        effective_max_tokens = max_tokens if max_tokens is not None else self.max_tokens
         async with httpx.AsyncClient(timeout=120) as client:
             async with client.stream(
                 "POST",
@@ -36,7 +45,8 @@ class DeepSeekProvider(BaseLLMProvider):
                 json={
                     "model": self.model,
                     "messages": messages,
-                    "max_tokens": max_tokens,
+                    "max_tokens": effective_max_tokens,
+                    "temperature": self.temperature,
                     "stream": True,
                 },
             ) as resp:
@@ -60,13 +70,22 @@ class DeepSeekProvider(BaseLLMProvider):
 class VolcanoProvider(BaseLLMProvider):
     """Volcano Engine (Doubao) uses OpenAI-compatible API."""
 
-    def __init__(self, api_key: str, model: str = "doubao-pro-4k"):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "doubao-pro-4k",
+        temperature: float = 0.7,
+        max_tokens: int = 2048,
+    ):
         self.api_key = api_key
         self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
 
     async def stream_chat(
-        self, messages: list[dict], max_tokens: int = 2048
+        self, messages: list[dict], max_tokens: int | None = None
     ) -> AsyncGenerator[str, None]:
+        effective_max_tokens = max_tokens if max_tokens is not None else self.max_tokens
         async with httpx.AsyncClient(timeout=120) as client:
             async with client.stream(
                 "POST",
@@ -75,7 +94,8 @@ class VolcanoProvider(BaseLLMProvider):
                 json={
                     "model": self.model,
                     "messages": messages,
-                    "max_tokens": max_tokens,
+                    "max_tokens": effective_max_tokens,
+                    "temperature": self.temperature,
                     "stream": True,
                 },
             ) as resp:
@@ -102,10 +122,14 @@ def get_provider(service_type: str, config: dict) -> BaseLLMProvider:
         return DeepSeekProvider(
             api_key=config["api_key"],
             model=config.get("model_name", "deepseek-chat"),
+            temperature=float(config.get("temperature", 1.0)),
+            max_tokens=int(config.get("max_tokens", 4096)),
         )
     if service_type == "llm_volcano":
         return VolcanoProvider(
             api_key=config["api_key"],
             model=config.get("model_name", "doubao-pro-4k"),
+            temperature=float(config.get("temperature", 0.7)),
+            max_tokens=int(config.get("max_tokens", 2048)),
         )
     raise ValueError(f"Unknown LLM service type: {service_type}")

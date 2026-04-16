@@ -158,6 +158,63 @@ GenPlatform 现有知识库（Knowledge Base）功能已支持：
 | REQ-NFUNC-003 | 性能 | 目录上传中每个文件的 Celery 任务独立异步调度，不阻塞 HTTP 响应 |
 | REQ-NFUNC-004 | 兼容性 | 现有单文件上传 API 接口不得有破坏性变更（向后兼容） |
 | REQ-NFUNC-005 | 存储配额 | 目录上传时逐文件检查配额，超出时提前终止而非全部拒绝 |
+| REQ-NFUNC-006 | 兼容性 | LLM 参数扩展不需要数据库 migration（config 为 JSON 字段，可直接扩展） |
+
+---
+
+## 7. LLM 参数配置扩展（新增 — 2026-04-16）
+
+### 7.1 背景
+
+当前"大语言模型"设置页面仅支持 API Key 和（火山引擎的）模型 ID 两个字段。需要扩展以支持：
+- DeepSeek：模型选择 + 核心推理参数（temperature、max_tokens）
+- 火山引擎（豆包）：模型下拉（常用豆包模型）+ endpoint ID 联动 + 核心推理参数
+
+### 7.2 需求规格
+
+#### REQ-FUNC-010
+**来源**：用户需求 — "DeepSeek：添加模型选择下拉框（可选模型来自 DeepSeek 官方）+ 其他显著参数"
+
+DeepSeek 配置区块须新增：
+1. 模型选择下拉框，可选模型：
+   - `deepseek-chat`（DeepSeek-V3，通用对话，推荐，默认值）
+   - `deepseek-reasoner`（DeepSeek-R1，推理模型）
+2. temperature 数字输入，范围 0–2，步长 0.1，默认 1.0
+3. max_tokens 数字输入，范围 1–8192，默认 4096
+
+**验收标准（AC）**：
+- **Given** 用户在 DeepSeek 配置区块选择模型 `deepseek-reasoner`，填写 temperature=0.5，max_tokens=2048，**When** 点击保存，**Then** 后端 `config_preview` 返回 `model_name=deepseek-reasoner`，LLM 调用时使用该模型及参数。
+- **Given** 用户未选择模型，**When** 保存，**Then** 后端默认使用 `deepseek-chat`。
+- **Given** 用户填写了所有 DeepSeek 参数并保存，**When** 刷新页面再打开设置，**Then** 所有参数回显正确。
+
+#### REQ-FUNC-011
+**来源**：用户需求 — "火山引擎（豆包）：添加模型选择下拉框 + endpoint ID 自动联动"
+
+火山引擎配置区块须新增：
+1. 模型下拉框，列出常用豆包模型（显示名称及对应 endpoint 前缀提示）：
+   - Doubao-pro-4k
+   - Doubao-pro-32k
+   - Doubao-pro-128k
+   - Doubao-lite-4k
+   - Doubao-lite-32k
+   - Doubao-1.5-pro-32k
+   - Doubao-1.5-lite-32k
+2. 选择模型时，endpoint ID 输入框（`model_name` 字段）不自动填充（因 endpoint ID 是用户在火山引擎控制台手动创建的），但在 placeholder 或提示文字中显示对应的建议模型名称。
+3. temperature 数字输入，范围 0–1，步长 0.1，默认 0.7
+4. max_tokens 数字输入，范围 1–4096，默认 2048
+
+**验收标准（AC）**：
+- **Given** 用户在火山引擎配置区块选择模型 `Doubao-pro-32k`，填写 endpoint ID、temperature=0.8，max_tokens=2000，**When** 点击保存，**Then** 后端 config 保存 `doubao_model=Doubao-pro-32k`，`model_name=ep-xxx`，`temperature=0.8`，`max_tokens=2000`。
+- **Given** 用户填写了所有火山引擎参数并保存，**When** 刷新页面，**Then** 所有参数包括模型选择均回显正确。
+
+#### REQ-FUNC-012
+**来源**：用户需求 — "所有新增参数要能保存到后端、能从后端加载回显"
+
+后端 `providers.py` 的 `DeepSeekProvider` 和 `VolcanoProvider` 须从 config 中读取 `temperature` 和 `max_tokens`，在调用 LLM API 时将这些参数传入请求体。
+
+**验收标准（AC）**：
+- **Given** DeepSeek config 存储了 `temperature=0.5`，`max_tokens=2048`，**When** LLM gateway 发起流式请求，**Then** HTTP 请求体包含 `"temperature": 0.5, "max_tokens": 2048`。
+- **Given** Volcano config 存储了 `temperature=0.8`，`max_tokens=2000`，**When** LLM gateway 发起流式请求，**Then** HTTP 请求体包含 `"temperature": 0.8, "max_tokens": 2000`。
 
 ---
 

@@ -19,10 +19,16 @@ class ServiceConfigListView(APIView):
         for cfg in configs:
             try:
                 raw = decrypt(bytes(cfg.encrypted_config))
-                # Mask sensitive values
-                masked = {k: _mask_value(v) for k, v in raw.items() if k != "model_name"}
-                if "model_name" in raw:
-                    masked["model_name"] = raw["model_name"]
+                # Non-sensitive fields are returned as-is; sensitive fields are masked.
+                # Sensitive: api_key, access_key, secret_key (anything with "key" in name).
+                # Non-sensitive (plaintext): model_name, doubao_model, temperature, max_tokens.
+                non_sensitive = {"model_name", "doubao_model", "temperature", "max_tokens"}
+                masked = {}
+                for k, v in raw.items():
+                    if k in non_sensitive:
+                        masked[k] = v
+                    else:
+                        masked[k] = _mask_value(v)
             except Exception:
                 masked = {}
             result.append({

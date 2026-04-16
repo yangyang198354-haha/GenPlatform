@@ -269,3 +269,73 @@ Scenario: 不能重命名他人的文档
 | US-006  | 检索不返回他人内容 | F-02 | P0 | 低（已有实现，需测试补全） |
 | US-007  | 单文件上传默认文件名 | F-03 | P1 | 低（已有实现，需前端调整） |
 | US-008  | 上传后重命名文档 | F-03 | P1 | 中 |
+| US-009  | DeepSeek 模型和参数配置 | F-04 | P0 | 中 |
+| US-010  | 火山引擎模型和参数配置 | F-04 | P0 | 中 |
+
+---
+
+## Epic 4：LLM 参数配置扩展（新增 — 2026-04-16）
+
+### US-009 — 为 DeepSeek 选择模型并配置推理参数
+
+**As** 使用 DeepSeek API 的用户，
+**I want** 在设置页面选择 DeepSeek 模型并配置 temperature 和 max_tokens，
+**So that** 我可以根据任务类型调整模型行为，而无需修改代码。
+
+**验收标准（Gherkin）**：
+
+```gherkin
+Scenario: 选择 DeepSeek 模型并保存后能回显
+  Given 用户已登录，在"大语言模型"设置页
+  And 当前服务商为 DeepSeek
+  When 用户从模型下拉框选择 "deepseek-reasoner"
+  And 设置 temperature = 0.5，max_tokens = 2048
+  And 点击保存
+  Then 页面显示"LLM 配置已保存"
+  When 用户刷新页面，重新打开设置
+  Then 模型下拉框显示 "deepseek-reasoner"
+  And temperature 输入框显示 0.5
+  And max_tokens 输入框显示 2048
+
+Scenario: 未选择模型时保存使用默认模型
+  Given 用户已登录，在"大语言模型"设置页
+  And 服务商为 DeepSeek，模型下拉框未选择（默认 deepseek-chat）
+  When 用户填写 API Key 并保存
+  Then 后端 config 中 model_name = "deepseek-chat"
+```
+
+**关联需求**：REQ-FUNC-010, REQ-FUNC-012
+
+---
+
+### US-010 — 为火山引擎选择模型并配置推理参数
+
+**As** 使用火山引擎（豆包）API 的用户，
+**I want** 在设置页面选择豆包模型系列、填写 endpoint ID，并配置 temperature 和 max_tokens，
+**So that** 我可以灵活控制豆包 API 的调用行为。
+
+**验收标准（Gherkin）**：
+
+```gherkin
+Scenario: 选择豆包模型并保存后能回显
+  Given 用户已登录，在"大语言模型"设置页
+  And 当前服务商为 火山引擎（豆包）
+  When 用户从模型下拉框选择 "Doubao-pro-32k"
+  And 填写 endpoint ID = "ep-20240101-abc123"
+  And 设置 temperature = 0.8，max_tokens = 2000
+  And 点击保存
+  Then 页面显示"LLM 配置已保存"
+  When 用户刷新页面
+  Then 豆包模型下拉框显示 "Doubao-pro-32k"
+  And endpoint ID 输入框显示 "ep-20240101-abc123"（已脱敏显示）
+  And temperature 显示 0.8
+  And max_tokens 显示 2000
+
+Scenario: 火山引擎保存时 endpoint ID 必填
+  Given 用户已登录，在火山引擎配置区块
+  And API Key 已填写，但 endpoint ID 为空
+  When 用户点击保存
+  Then 显示警告"火山引擎需要填写模型 ID（推理接入点）"
+```
+
+**关联需求**：REQ-FUNC-011, REQ-FUNC-012
