@@ -17,9 +17,85 @@
             <el-form-item label="API Key">
               <el-input v-model="llmForm.api_key" show-password placeholder="sk-..." />
             </el-form-item>
-            <el-form-item v-if="llmForm.provider === 'volcano'" label="模型 ID">
-              <el-input v-model="llmForm.model_name" placeholder="ep-xxxxxxxx（火山引擎推理接入点 ID）" />
-            </el-form-item>
+
+            <!-- DeepSeek specific fields -->
+            <template v-if="llmForm.provider === 'deepseek'">
+              <el-form-item label="模型">
+                <el-select v-model="llmForm.deepseek_model" placeholder="选择模型" style="width: 100%">
+                  <el-option
+                    v-for="m in deepseekModels"
+                    :key="m.value"
+                    :label="m.label"
+                    :value="m.value"
+                  />
+                </el-select>
+                <div class="field-hint">{{ deepseekModelHint }}</div>
+              </el-form-item>
+              <el-form-item label="Temperature">
+                <el-input-number
+                  v-model="llmForm.deepseek_temperature"
+                  :min="0"
+                  :max="2"
+                  :step="0.1"
+                  :precision="1"
+                  style="width: 180px"
+                />
+                <span class="field-hint" style="margin-left: 8px">范围 0–2，默认 1.0；越高越随机</span>
+              </el-form-item>
+              <el-form-item label="Max Tokens">
+                <el-input-number
+                  v-model="llmForm.deepseek_max_tokens"
+                  :min="1"
+                  :max="8192"
+                  :step="256"
+                  style="width: 180px"
+                />
+                <span class="field-hint" style="margin-left: 8px">范围 1–8192，默认 4096</span>
+              </el-form-item>
+            </template>
+
+            <!-- Volcano specific fields -->
+            <template v-if="llmForm.provider === 'volcano'">
+              <el-form-item label="豆包模型">
+                <el-select v-model="llmForm.doubao_model" placeholder="选择豆包模型系列" style="width: 100%">
+                  <el-option
+                    v-for="m in volcanoModels"
+                    :key="m.value"
+                    :label="m.label"
+                    :value="m.value"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="Endpoint ID">
+                <el-input
+                  v-model="llmForm.model_name"
+                  :placeholder="volcanoEndpointPlaceholder"
+                />
+                <div class="field-hint">在火山引擎控制台"推理接入点"中创建并复制 ID（格式：ep-xxxxxxxx）</div>
+              </el-form-item>
+              <el-form-item label="Temperature">
+                <el-input-number
+                  v-model="llmForm.volcano_temperature"
+                  :min="0"
+                  :max="1"
+                  :step="0.1"
+                  :precision="1"
+                  style="width: 180px"
+                />
+                <span class="field-hint" style="margin-left: 8px">范围 0–1，默认 0.7</span>
+              </el-form-item>
+              <el-form-item label="Max Tokens">
+                <el-input-number
+                  v-model="llmForm.volcano_max_tokens"
+                  :min="1"
+                  :max="4096"
+                  :step="256"
+                  style="width: 180px"
+                />
+                <span class="field-hint" style="margin-left: 8px">范围 1–4096，默认 2048</span>
+              </el-form-item>
+            </template>
+
             <el-form-item>
               <el-button type="primary" :loading="savingLlm" @click="saveLlmConfig">保存</el-button>
               <el-button :loading="testingLlm" @click="testLlmConfig">测试连接</el-button>
@@ -89,24 +165,81 @@ import { settingsAPI } from "@/api";
 
 const activeTab = ref("llm");
 
+// ── DeepSeek 可选模型列表 ────────────────────────────────────────────────────
+const deepseekModels = [
+  { value: "deepseek-chat",     label: "deepseek-chat（DeepSeek-V3，通用对话，推荐）" },
+  { value: "deepseek-reasoner", label: "deepseek-reasoner（DeepSeek-R1，推理模型）" },
+];
+
+// ── 火山引擎（豆包）可选模型列表 ────────────────────────────────────────────
+const volcanoModels = [
+  { value: "Doubao-pro-4k",       label: "Doubao-pro-4k（专业版，4K 上下文）" },
+  { value: "Doubao-pro-32k",      label: "Doubao-pro-32k（专业版，32K 上下文）" },
+  { value: "Doubao-pro-128k",     label: "Doubao-pro-128k（专业版，128K 上下文）" },
+  { value: "Doubao-lite-4k",      label: "Doubao-lite-4k（轻量版，4K 上下文）" },
+  { value: "Doubao-lite-32k",     label: "Doubao-lite-32k（轻量版，32K 上下文）" },
+  { value: "Doubao-1.5-pro-32k",  label: "Doubao-1.5-pro-32k（新一代专业版）" },
+  { value: "Doubao-1.5-lite-32k", label: "Doubao-1.5-lite-32k（新一代轻量版）" },
+];
+
 // ── LLM ─────────────────────────────────────────────────────────────────────
-const llmForm    = ref({ provider: "deepseek", api_key: "", model_name: "" });
+const llmForm = ref({
+  provider: "deepseek",
+  api_key: "",
+  model_name: "",           // volcano endpoint ID
+  deepseek_model: "deepseek-chat",
+  deepseek_temperature: 1.0,
+  deepseek_max_tokens: 4096,
+  doubao_model: "Doubao-pro-32k",
+  volcano_temperature: 0.7,
+  volcano_max_tokens: 2048,
+});
 
 // 分别缓存两个 provider 的已保存配置（来自后端 config_preview），
 // 避免切换 provider 时互相覆盖同一个 api_key 字段。
 const llmSavedConfig = ref({
-  deepseek: { api_key: "" },
-  volcano:  { api_key: "", model_name: "" },
+  deepseek: {
+    api_key: "",
+    model_name: "deepseek-chat",
+    temperature: 1.0,
+    max_tokens: 4096,
+  },
+  volcano: {
+    api_key: "",
+    model_name: "",
+    doubao_model: "Doubao-pro-32k",
+    temperature: 0.7,
+    max_tokens: 2048,
+  },
 });
 
-// 切换 provider 单选框时，从缓存中回填当前 provider 的 key
+// DeepSeek 模型提示文字
+const deepseekModelHint = computed(() => {
+  const m = deepseekModels.find(x => x.value === llmForm.value.deepseek_model);
+  return m ? "" : "";
+});
+
+// 火山引擎 endpoint placeholder：根据选定的豆包模型给出提示
+const volcanoEndpointPlaceholder = computed(() => {
+  const model = llmForm.value.doubao_model;
+  if (!model) return "ep-xxxxxxxx（火山引擎推理接入点 ID）";
+  return `ep-xxxxxxxx（${model} 对应的推理接入点 ID）`;
+});
+
+// 切换 provider 单选框时，从缓存中回填当前 provider 的配置
 watch(() => llmForm.value.provider, (newProvider) => {
   if (newProvider === "deepseek") {
-    llmForm.value.api_key    = llmSavedConfig.value.deepseek.api_key;
-    llmForm.value.model_name = "";
+    llmForm.value.api_key             = llmSavedConfig.value.deepseek.api_key;
+    llmForm.value.deepseek_model      = llmSavedConfig.value.deepseek.model_name || "deepseek-chat";
+    llmForm.value.deepseek_temperature = Number(llmSavedConfig.value.deepseek.temperature) || 1.0;
+    llmForm.value.deepseek_max_tokens  = Number(llmSavedConfig.value.deepseek.max_tokens) || 4096;
+    llmForm.value.model_name          = "";
   } else {
-    llmForm.value.api_key    = llmSavedConfig.value.volcano.api_key;
-    llmForm.value.model_name = llmSavedConfig.value.volcano.model_name;
+    llmForm.value.api_key             = llmSavedConfig.value.volcano.api_key;
+    llmForm.value.model_name          = llmSavedConfig.value.volcano.model_name;
+    llmForm.value.doubao_model        = llmSavedConfig.value.volcano.doubao_model || "Doubao-pro-32k";
+    llmForm.value.volcano_temperature = Number(llmSavedConfig.value.volcano.temperature) || 0.7;
+    llmForm.value.volcano_max_tokens  = Number(llmSavedConfig.value.volcano.max_tokens) || 2048;
   }
 });
 
@@ -129,10 +262,22 @@ async function saveLlmConfig() {
   }
   savingLlm.value = true;
   try {
-    // 只发后端需要的字段，字段名与后端 _required_keys 一致
-    const payload = { api_key: llmForm.value.api_key };
-    if (llmForm.value.provider === "volcano") {
-      payload.model_name = llmForm.value.model_name;
+    let payload;
+    if (llmForm.value.provider === "deepseek") {
+      payload = {
+        api_key:     llmForm.value.api_key,
+        model_name:  llmForm.value.deepseek_model || "deepseek-chat",
+        temperature: llmForm.value.deepseek_temperature,
+        max_tokens:  llmForm.value.deepseek_max_tokens,
+      };
+    } else {
+      payload = {
+        api_key:      llmForm.value.api_key,
+        model_name:   llmForm.value.model_name,
+        doubao_model: llmForm.value.doubao_model,
+        temperature:  llmForm.value.volcano_temperature,
+        max_tokens:   llmForm.value.volcano_max_tokens,
+      };
     }
     await settingsAPI.save(llmServiceType.value, payload);
     ElMessage.success("LLM 配置已保存");
@@ -222,12 +367,17 @@ onMounted(async () => {
       const preview = cfg.config_preview || {};
       if (cfg.service_type === "llm_deepseek" && cfg.is_configured) {
         hasDeepseek = true;
-        // 将脱敏预览写入各自缓存，不直接覆盖 llmForm
-        if (preview.api_key) llmSavedConfig.value.deepseek.api_key = preview.api_key;
+        if (preview.api_key)     llmSavedConfig.value.deepseek.api_key     = preview.api_key;
+        if (preview.model_name)  llmSavedConfig.value.deepseek.model_name  = preview.model_name;
+        if (preview.temperature != null) llmSavedConfig.value.deepseek.temperature = preview.temperature;
+        if (preview.max_tokens  != null) llmSavedConfig.value.deepseek.max_tokens  = preview.max_tokens;
       } else if (cfg.service_type === "llm_volcano" && cfg.is_configured) {
         hasVolcano = true;
-        if (preview.api_key)    llmSavedConfig.value.volcano.api_key    = preview.api_key;
-        if (preview.model_name) llmSavedConfig.value.volcano.model_name = preview.model_name;
+        if (preview.api_key)      llmSavedConfig.value.volcano.api_key      = preview.api_key;
+        if (preview.model_name)   llmSavedConfig.value.volcano.model_name   = preview.model_name;
+        if (preview.doubao_model) llmSavedConfig.value.volcano.doubao_model = preview.doubao_model;
+        if (preview.temperature != null) llmSavedConfig.value.volcano.temperature = preview.temperature;
+        if (preview.max_tokens  != null) llmSavedConfig.value.volcano.max_tokens  = preview.max_tokens;
       } else if (cfg.service_type === "jimeng" && cfg.is_configured) {
         if (preview.access_key) jimengForm.value.access_key = preview.access_key;
         if (preview.secret_key) jimengForm.value.secret_key = preview.secret_key;
@@ -241,11 +391,16 @@ onMounted(async () => {
     // 因此手动触发一次回填，确保表单显示正确的缓存值）
     const p = llmForm.value.provider;
     if (p === "deepseek") {
-      llmForm.value.api_key    = llmSavedConfig.value.deepseek.api_key;
-      llmForm.value.model_name = "";
+      llmForm.value.api_key             = llmSavedConfig.value.deepseek.api_key;
+      llmForm.value.deepseek_model      = llmSavedConfig.value.deepseek.model_name || "deepseek-chat";
+      llmForm.value.deepseek_temperature = Number(llmSavedConfig.value.deepseek.temperature) || 1.0;
+      llmForm.value.deepseek_max_tokens  = Number(llmSavedConfig.value.deepseek.max_tokens) || 4096;
     } else {
-      llmForm.value.api_key    = llmSavedConfig.value.volcano.api_key;
-      llmForm.value.model_name = llmSavedConfig.value.volcano.model_name;
+      llmForm.value.api_key             = llmSavedConfig.value.volcano.api_key;
+      llmForm.value.model_name          = llmSavedConfig.value.volcano.model_name;
+      llmForm.value.doubao_model        = llmSavedConfig.value.volcano.doubao_model || "Doubao-pro-32k";
+      llmForm.value.volcano_temperature = Number(llmSavedConfig.value.volcano.temperature) || 0.7;
+      llmForm.value.volcano_max_tokens  = Number(llmSavedConfig.value.volcano.max_tokens) || 2048;
     }
   } catch (_) {
     // 首次使用，尚无配置，静默处理
@@ -256,4 +411,10 @@ onMounted(async () => {
 <style scoped>
 h2 { margin-bottom: 20px; }
 h3 { margin-top: 0; margin-bottom: 20px; }
+.field-hint {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+  line-height: 1.4;
+}
 </style>

@@ -122,4 +122,70 @@ test.describe('System Settings', () => {
     expect(volcanoKey).not.toBe(deepseekKey);
   });
 
+  test('E2E-004z: DeepSeek model selection and params saved and restored after reload', async ({ page }) => {
+    await page.getByText('大语言模型').click();
+    await page.getByText('DeepSeek').click();
+
+    // Fill API key
+    await page.getByPlaceholder('sk-...').fill('sk-test-deepseek-model-e2e');
+
+    // Select deepseek-reasoner from the model dropdown
+    await page.locator('.el-select').first().click();
+    await page.getByText('deepseek-reasoner（DeepSeek-R1，推理模型）').click();
+
+    // Set temperature to 0.5 — target el-input-number by surrounding form-item label
+    const temperatureInputNumber = page.locator('.el-form-item').filter({ hasText: 'Temperature' }).locator('input').first();
+    await temperatureInputNumber.fill('0.5');
+    await temperatureInputNumber.press('Tab');
+
+    // Set max_tokens to 2048
+    const maxTokensInputNumber = page.locator('.el-form-item').filter({ hasText: 'Max Tokens' }).locator('input').first();
+    await maxTokensInputNumber.fill('2048');
+    await maxTokensInputNumber.press('Tab');
+
+    // Save
+    await page.getByRole('button', { name: '保存' }).first().click();
+    await expect(page.getByText(/已保存|成功/)).toBeVisible({ timeout: 5000 });
+
+    // Reload and verify round-trip
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await page.getByText('大语言模型').click();
+    await page.getByText('DeepSeek').click();
+
+    // Model dropdown should show deepseek-reasoner
+    await expect(page.locator('.el-select').first()).toContainText('deepseek-reasoner');
+  });
+
+  test('E2E-004w: Volcano model selection and params saved and restored after reload', async ({ page }) => {
+    await page.getByText('大语言模型').click();
+    await page.getByText('火山引擎（豆包）').click();
+
+    // Fill API key and endpoint ID
+    await page.getByPlaceholder('sk-...').fill('sk-test-volcano-model-e2e');
+    await page.getByPlaceholder(/ep-/).fill('ep-20240101-modeltest');
+
+    // Select Doubao-pro-32k from the doubao model dropdown
+    // The doubao model select is the first el-select in volcano section
+    await page.locator('.el-select').first().click();
+    await page.getByText('Doubao-pro-32k（专业版，32K 上下文）').click();
+
+    // Save
+    await page.getByRole('button', { name: '保存' }).first().click();
+    await expect(page.getByText(/已保存|成功/)).toBeVisible({ timeout: 5000 });
+
+    // Reload and verify round-trip
+    await page.reload();
+    await page.waitForLoadState('networkidle');
+    await page.getByText('大语言模型').click();
+    await page.getByText('火山引擎（豆包）').click();
+
+    // Doubao model dropdown should show Doubao-pro-32k
+    await expect(page.locator('.el-select').first()).toContainText('Doubao-pro-32k');
+
+    // Endpoint ID should be restored (masked by backend)
+    const endpointVal = await page.getByPlaceholder(/ep-/).inputValue();
+    expect(endpointVal).toBeTruthy();
+  });
+
 });
