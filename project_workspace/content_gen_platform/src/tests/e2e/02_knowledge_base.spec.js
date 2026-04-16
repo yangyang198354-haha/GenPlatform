@@ -32,7 +32,8 @@ test.describe('Knowledge Base', () => {
     // Create a small temp txt file to upload
     await page.getByRole('button', { name: /上传文档/ }).click();
 
-    const fileInput = page.locator('input[type="file"]');
+    // Use name="file" to target the single-file input, not the directory input (webkitdirectory)
+    const fileInput = page.locator('input[name="file"]');
     await fileInput.setInputFiles({
       name: 'test_doc.txt',
       mimeType: 'text/plain',
