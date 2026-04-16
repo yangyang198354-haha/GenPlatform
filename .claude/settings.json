@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git commit*)",
+            "timeout": 120,
+            "statusMessage": "Running pre-commit unit tests...",
+            "command": "python -c \"\nimport json, sys, subprocess, os, socket\ndata = json.load(sys.stdin)\ncmd = data.get('tool_input', {}).get('command', '')\nif 'git commit' not in cmd:\n    sys.exit(0)\n\n# Check if local PostgreSQL is reachable\ndef pg_reachable():\n    try:\n        s = socket.create_connection(('localhost', 5432), timeout=2)\n        s.close()\n        return True\n    except Exception:\n        return False\n\nif not pg_reachable():\n    print(json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'additionalContext': '[pre-commit] PostgreSQL not reachable locally - skipping unit tests. CI will enforce the test gate on push.'}}))\n    sys.exit(0)\n\nbackend = os.path.join(os.getcwd(), 'project_workspace', 'content_gen_platform', 'src', 'backend')\nenv = os.environ.copy()\nenv.update({\n    'DJANGO_SETTINGS_MODULE': 'config.settings.test',\n    'POSTGRES_DB': 'test_db',\n    'POSTGRES_USER': 'postgres',\n    'POSTGRES_PASSWORD': 'postgres',\n    'POSTGRES_HOST': 'localhost',\n    'POSTGRES_PORT': '5432',\n    'ENCRYPTION_KEY': 'dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXQ=',\n    'DJANGO_SECRET_KEY': 'local-dev-secret-key'\n})\nresult = subprocess.run(\n    ['python', '-m', 'pytest', 'apps/', '-m', 'not integration and not e2e', '-x', '-q', '--tb=short'],\n    cwd=backend, env=env\n)\nif result.returncode != 0:\n    print(json.dumps({\n        'decision': 'block',\n        'reason': 'Unit tests failed. Fix before committing: cd project_workspace/content_gen_platform/src/backend && pytest apps/ -m \"not integration and not e2e\" -x -q --tb=short'\n    }))\n    sys.exit(2)\n\""
+          }
+        ]
+      }
+    ]
+  }
+}
