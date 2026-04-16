@@ -302,7 +302,7 @@ class TestUserIsolation:
 
         resp = client1.get(DOCS_URL)
         assert resp.status_code == status.HTTP_200_OK
-        ids = [d["id"] for d in (resp.data.get("results") or resp.data)]
+        ids = [d["id"] for d in resp.data.get("results", resp.data)]
         user1_ids = set(Document.objects.filter(user=user1).values_list("pk", flat=True))
         user2_ids = set(Document.objects.filter(user=user2).values_list("pk", flat=True))
         assert all(i in user1_ids for i in ids)
@@ -380,12 +380,12 @@ class TestUserIsolation:
         # user2 list must be empty
         resp = client2.get(DOCS_URL)
         assert resp.status_code == status.HTTP_200_OK
-        data = resp.data.get("results") or resp.data
+        data = resp.data.get("results", resp.data)
         assert len(data) == 0
 
         # user1 list must have exactly one document
         resp1 = client1.get(DOCS_URL)
-        data1 = resp1.data.get("results") or resp1.data
+        data1 = resp1.data.get("results", resp1.data)
         assert len(data1) == 1
         assert data1[0]["original_filename"] == "user1_doc.txt"
 
