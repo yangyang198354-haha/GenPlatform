@@ -96,17 +96,26 @@ test.describe('System Settings', () => {
     await page.getByRole('button', { name: '保存' }).first().click();
     await expect(page.getByText(/已保存|成功/)).toBeVisible({ timeout: 5000 });
 
-    // Reload page to force onMounted re-fetch from backend
+    // Reload page to force onMounted re-fetch from backend.
+    // Wait for networkidle so onMounted's async settingsAPI.list() call has
+    // completed and llmSavedConfig has been populated before we read field values.
     await page.reload();
+    await page.waitForLoadState('networkidle');
     await page.getByText('大语言模型').click();
 
-    // Verify DeepSeek key is shown under DeepSeek radio
+    // Verify DeepSeek key is shown under DeepSeek radio.
+    // After reload the form defaults to deepseek; clicking the radio is a no-op
+    // but ensures we're reading the right field.
     await page.getByText('DeepSeek').click();
+    // Wait for the api_key field to be populated (onMounted backfill may still
+    // be setting reactivity after networkidle)
+    await expect(page.getByPlaceholder('sk-...')).not.toHaveValue('', { timeout: 5000 });
     const deepseekKey = await page.getByPlaceholder('sk-...').inputValue();
     expect(deepseekKey).toMatch(/^sk-/);
 
     // Switch to Volcano — should show Volcano's own key (masked), NOT DeepSeek's
     await page.getByText('火山引擎（豆包）').click();
+    await expect(page.getByPlaceholder('sk-...')).not.toHaveValue('', { timeout: 5000 });
     const volcanoKey = await page.getByPlaceholder('sk-...').inputValue();
     expect(volcanoKey).toMatch(/^sk-/);
     // The two displayed keys must differ (they are separately stored)
