@@ -127,6 +127,48 @@ export default defineConfig({ ... });
 
 ---
 
+## DE-L008: 知识库切片不落库 — 三个历史根因与防回归措施
+
+**日期**: 2026-04-16  
+**场景**: 知识库上传文档后 `DocumentChunk` 无数据、文档永远停留在 "processing"
+
+本项目曾发生三次独立的"chunk 不落库"事故，每次根因不同：
+
+### 根因 1：Celery 队列路由错误（提交 `3f108ae` 之前）
+
+`CELERY_TASK_DEFAULT_QUEUE` 未设置，任务投递到内置 `celery` 队列，
+worker 只监听 `default` 队列，所有任务被无声忽略。
+
+**防回归**:
+- `base.py` 中 `CELERY_TASK_DEFAULT_QUEUE = "default"` 必须与 docker-compose.yml 中 `-Q default,...` 保持一致
+- 修改任一方时必须同步修改另一方，并在 PR 描述中明确说明两侧的值
+
+### 根因 2：VectorField 维度与模型输出不匹配（提交 `be2ab07`）
+
+模型从 bge-m3（1024维）切换到 bge-small-zh-v1.5（512维），
+如果 migration 未执行，pgvector 拒绝维度不匹配的 `bulk_create`，文档变 "error"。
+
+**防回归**:
+- 切换 embedding 模型时必须同 PR 提交：① models.py 维度 ② migration ③ 单测 EXPECTED_DIM 常量
+- 在 CI 中加维度 smoke test（不需 DB），参见 TE-L014
+
+### 根因 3：大型 DOCX 触发 OOM kill worker（提交 `17c4b4f` 修复）
+
+`model.encode(chunks)` 无 `batch_size`，大文档 OOM → SIGKILL → 所有 Python except 被绕过 → 永久 "processing"。
+
+**防回归**:
+- `model.encode()` 必须传 `batch_size=32`
+- Celery task 必须设 `soft_time_limit=300`（发 Python 可捕获的 SoftTimeLimitExceeded，而非 SIGKILL）
+- 以上两点都必须有对应的单元测试断言
+
+### 共同预防措施
+
+1. `CELERY_TASK_ALWAYS_EAGER=True`（test.py）绕过 broker，无法检测队列路由问题
+   → 队列路由变更需额外的集成检查（对比 settings.CELERY_TASK_DEFAULT_QUEUE 与 docker-compose -Q）
+2. 文档长期停留 "processing" 时，首先检查：celery worker 日志、队列名一致性、VectorField 维度
+
+---
+
 ## DE-L007: CI 整体通过标准
 
 **日期**: 2026-04-10  

@@ -222,6 +222,87 @@ await expect(page.getByRole('button', { name: /开始生成/ }))
 
 ---
 
+## TE-L012: Mock — encode 等形状依赖输入的函数必须用 side_effect，不能用 return_value
+
+**日期**: 2026-04-16  
+**场景**: `TestProcessDocument` 系列测试 mock `_get_embedding_model`
+
+**问题**: 所有测试都写成：
+```python
+mock_model.encode.return_value = np.zeros((1, 512), dtype="float32")
+```
+这里 `(1, 512)` 是固定形状。当文档切分出 N > 1 个 chunk 时，
+`zip(chunks, embeddings)` 按最短者截断，只生成 1 个 chunk 写入 DB。
+测试靠 `assert doc.chunk_count >= 1` 通过（恰好 1 个），
+但生产中多 chunk 文档只有 1 个 chunk 落库，其余静默丢失。
+
+**根因**: `return_value` 无论输入多少文本都返回相同的固定数组；
+而真实的 `model.encode(texts)` 输出形状是 `(len(texts), 512)`。
+
+**正确做法**:
+```python
+# 根据输入 chunk 数量动态生成正确形状
+mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
+```
+
+**通用规则**: 凡是被 mock 的函数其 **输出形状/内容依赖于输入**，
+必须使用 `side_effect` 动态生成，不能使用固定 `return_value`。
+常见此类函数：`model.encode(texts)`, `tokenizer(texts)`, `batch_predict(inputs)`。
+
+---
+
+## TE-L013: 测试 — 资源约束参数（batch_size / timeout）必须通过 call_args 断言验证
+
+**日期**: 2026-04-16  
+**场景**: `model.encode()` 未传 `batch_size` 导致 OOM kill worker
+
+**问题**: `process_document` 调用 `model.encode(chunks)` 未传 `batch_size`，
+大型文档一次性把所有 chunk 张量加载到 RAM，触发 Linux OOM killer (SIGKILL)。
+SIGKILL 绕过所有 Python `except` 块，文档永久停留在 `"processing"`。
+但测试只验证最终状态（`doc.status == "available"`），不验证 encode 的调用参数，
+因此测试全绿，OOM 风险完全不可见。
+
+**正确做法**：在测试中同时断言参数：
+```python
+_, call_kwargs = mock_model.encode.call_args
+assert call_kwargs.get("batch_size") == 32, (
+    "model.encode() must use batch_size=32 to prevent OOM on large documents"
+)
+```
+
+**通用规则**: 涉及 OS 级资源（RAM、线程数、文件句柄、超时）的调用，
+除了验证输出结果，**必须通过 `call_args` 断言验证约束参数的存在和正确值**。
+典型参数：`batch_size`、`max_workers`、`timeout`、`num_threads`。
+
+---
+
+## TE-L014: Smoke Test — VectorField 维度与模型输出必须有一致性断言
+
+**日期**: 2026-04-16  
+**场景**: embedding 模型从 bge-m3（1024维）切换到 bge-small-zh-v1.5（512维）
+
+**问题**: 切换模型时 `VectorField(dimensions=)` 如果漏改或 migration 未执行，
+`bulk_create()` 会被 pgvector 以维度错误拒绝，文档状态变为 `"error"`，chunk 不落库。
+但所有测试都 mock 了 encode 输出，无法检测维度不匹配。
+
+**正确做法**：增加不需要 DB 的 smoke test：
+```python
+class TestVectorFieldDimension:
+    EXPECTED_DIM = 512  # bge-small-zh-v1.5
+
+    def test_vector_field_dimension_matches_embedding_model(self):
+        from apps.knowledge_base.models import DocumentChunk
+        field = DocumentChunk._meta.get_field("embedding")
+        assert field.dimensions == self.EXPECTED_DIM
+```
+
+**通用规则**: 任何 schema 字段的取值需与代码常量保持一致时，
+必须有对应的 smoke test 在 CI 最早阶段（无需 DB）执行断言。
+切换 embedding 模型时必须同步修改：
+① `VectorField(dimensions=N)` ② migration ③ 本测试 `EXPECTED_DIM` ④ 所有 mock 数组形状。
+
+---
+
 ## TE-L010: E2E 测试 — ElMessage.warning 产生 .el-message--warning 而非 --error
 
 **日期**: 2026-04-10  

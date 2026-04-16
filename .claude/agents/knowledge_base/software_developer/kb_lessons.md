@@ -279,6 +279,77 @@ COPY . .
 
 ---
 
+## SD-L014: Celery 任务 — 必须设置 soft_time_limit 防止 OOM 导致永久 "processing"
+
+**日期**: 2026-04-16  
+**文件**: `apps/knowledge_base/tasks.py`
+
+**问题**: `process_document_task` 调用 `model.encode(chunks)` 时，大型 DOCX
+会产生大量 chunk，全部一次性传入 encode 导致峰值 RAM 超限，
+Linux OOM killer 发送 **SIGKILL** 杀掉 worker 进程。
+
+SIGKILL 是 OS 信号，Python 的 `try/except Exception` **完全无法捕获**，
+所有异常处理代码都不会执行，文档永久停留在 `"processing"` 状态。
+
+**双重修复**：
+
+1. **`batch_size=32`**（services.py）— 分批编码，峰值 RAM 可控：
+```python
+embeddings = model.encode(
+    chunks, batch_size=32, show_progress_bar=False, normalize_embeddings=True
+)
+```
+
+2. **`soft_time_limit=300`**（tasks.py）— Celery 发 SIGUSR1（Python 可捕获）而非 SIGKILL：
+```python
+from celery.exceptions import SoftTimeLimitExceeded
+
+@shared_task(bind=True, max_retries=0, soft_time_limit=300)
+def process_document_task(self, document_id: int) -> None:
+    try:
+        _process_document(document_id)
+    except SoftTimeLimitExceeded:
+        Document.objects.filter(pk=document_id).update(
+            status="error",
+            error_message="处理超时，请重试或联系管理员（文档可能过大）",
+        )
+    except Exception as exc:
+        Document.objects.filter(pk=document_id).update(
+            status="error", error_message=f"Task error: {exc}"
+        )
+```
+
+**通用规则**:
+- 处理文件/ML 推理的 Celery task 必须设 `soft_time_limit`（发 Python 异常）
+- `soft_time_limit` 必须有对应的 `SoftTimeLimitExceeded` 测试
+- `except Exception` 挡不住 SIGKILL，只有 `soft_time_limit` + `batch_size` 才能防止永久 "processing"
+
+---
+
+## SD-L015: 嵌入编码 — model.encode() 必须指定 batch_size 防止 OOM
+
+**日期**: 2026-04-16  
+**文件**: `apps/knowledge_base/services.py`
+
+**问题**: `model.encode(chunks)` 默认一次性编码所有输入，峰值内存 ∝ chunk 数量。
+对于大型文档（数百 chunk），这会耗尽 Celery worker 的可用 RAM，
+触发 OOM killer 的 SIGKILL，文档永久卡在 "processing"。
+
+**正确做法**：始终传 `batch_size`：
+```python
+embeddings = model.encode(
+    chunks,
+    batch_size=32,           # 每批 32 个 chunk，峰值内存可控
+    show_progress_bar=False,
+    normalize_embeddings=True,
+)
+```
+
+**规则**: 凡是对可变长度列表调用 ML 推理（encode/predict/embed），
+必须指定 `batch_size` 或等效的分批参数，且该参数必须有测试断言。
+
+---
+
 ## SD-L010: Celery 任务 — max_retries=0 避免 retry 覆盖 error 状态
 
 **日期**: 2026-04-11  

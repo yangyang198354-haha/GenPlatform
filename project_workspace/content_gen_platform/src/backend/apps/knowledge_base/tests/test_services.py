@@ -347,10 +347,12 @@ class TestProcessDocument:
 
     @patch("apps.knowledge_base.services._get_embedding_model")
     def test_process_document_success(self, mock_get_model, user, tmp_path):
-        # Mock the embedding model to return fake vectors
+        # Mock returns (N, 512) shaped array matching the number of input chunks.
+        # Using side_effect instead of return_value so multi-chunk documents
+        # get a correctly-shaped embedding matrix — a fixed (1, 512) return_value
+        # would silently truncate to 1 chunk via zip() for longer documents.
         mock_model = MagicMock()
-        import numpy as np
-        mock_model.encode.return_value = np.zeros((1, 512), dtype="float32")
+        mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
         mock_get_model.return_value = mock_model
 
         doc = self._make_doc(user, tmp_path)
@@ -364,10 +366,9 @@ class TestProcessDocument:
     @patch("apps.knowledge_base.services._get_embedding_model")
     def test_process_document_creates_chunks(self, mock_get_model, user, tmp_path):
         from apps.knowledge_base.models import DocumentChunk
-        import numpy as np
 
         mock_model = MagicMock()
-        mock_model.encode.return_value = np.zeros((1, 512), dtype="float32")
+        mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
         mock_get_model.return_value = mock_model
 
         doc = self._make_doc(user, tmp_path)
@@ -378,10 +379,9 @@ class TestProcessDocument:
     @patch("apps.knowledge_base.services._get_embedding_model")
     def test_process_document_replaces_existing_chunks(self, mock_get_model, user, tmp_path):
         from apps.knowledge_base.models import DocumentChunk
-        import numpy as np
 
         mock_model = MagicMock()
-        mock_model.encode.return_value = np.zeros((1, 512), dtype="float32")
+        mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
         mock_get_model.return_value = mock_model
 
         doc = self._make_doc(user, tmp_path)
@@ -392,6 +392,31 @@ class TestProcessDocument:
         process_document(doc.pk)
         second_count = DocumentChunk.objects.filter(document=doc).count()
         assert second_count == first_count  # same count, not doubled
+
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_process_document_encode_uses_batch_size(self, mock_get_model, user, tmp_path):
+        """
+        model.encode() must be called with batch_size=32.
+
+        Regression guard: without batch_size the worker encodes all chunks in a
+        single forward pass, causing peak RAM to spike on large documents and
+        triggering the Linux OOM killer (SIGKILL).  SIGKILL bypasses all Python
+        exception handlers, leaving the document stuck at status='processing' forever.
+        """
+        mock_model = MagicMock()
+        mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
+        mock_get_model.return_value = mock_model
+
+        doc = self._make_doc(user, tmp_path)
+        process_document(doc.pk)
+
+        assert mock_model.encode.called, "model.encode() must be called during processing"
+        _, call_kwargs = mock_model.encode.call_args
+        assert call_kwargs.get("batch_size") == 32, (
+            "model.encode() must be called with batch_size=32 to cap peak RAM usage. "
+            "Without this, large documents can OOM-kill the Celery worker and leave "
+            "the document stuck at status='processing' indefinitely."
+        )
 
     @patch("apps.knowledge_base.services._get_embedding_model")
     def test_process_document_docx_success(self, mock_get_model, user, tmp_path):
@@ -421,7 +446,7 @@ class TestProcessDocument:
         word_doc.save(str(docx_path))
 
         mock_model = MagicMock()
-        mock_model.encode.return_value = np.zeros((1, 512), dtype="float32")
+        mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
         mock_get_model.return_value = mock_model
 
         doc = Document.objects.create(
@@ -746,3 +771,46 @@ class TestSearch:
         # The specific terms important for the community-name scenario
         assert "车位" in kws
         assert "业主大会" in kws
+
+
+# ── VectorField dimension smoke test ─────────────────────────────────────────
+
+class TestVectorFieldDimension:
+    """
+    Smoke test: DocumentChunk.embedding VectorField dimensions must match the
+    embedding model output dimension (512 for bge-small-zh-v1.5).
+
+    Regression guard for SD-L011 / be2ab07: when the model was switched from
+    bge-m3 (1024-dim) to bge-small-zh-v1.5 (512-dim), a mismatch between the
+    VectorField declaration and the model output would cause pgvector to reject
+    bulk_create() inserts with a dimension error.  This test catches the mismatch
+    at import time (no DB required) so any future model change that forgets to
+    update the VectorField is immediately surfaced.
+
+    Rule: whenever EMBEDDING_MODEL or its output dimension changes, ALL of the
+    following must be updated in the same commit:
+      1. VectorField(dimensions=N) in models.py
+      2. A new migration to ALTER the column type
+      3. This test's expected dimension constant
+      4. All mock arrays: np.zeros((len(texts), N), ...)
+    """
+
+    EXPECTED_DIM = 512  # bge-small-zh-v1.5 output dimension
+
+    def test_vector_field_dimension_matches_embedding_model(self):
+        """
+        DocumentChunk.embedding must declare dimensions=512, matching
+        bge-small-zh-v1.5 output.  Update EXPECTED_DIM here if the model changes
+        (and remember to also create a migration + update mock arrays).
+        """
+        from apps.knowledge_base.models import DocumentChunk
+        field = DocumentChunk._meta.get_field("embedding")
+        assert field.dimensions == self.EXPECTED_DIM, (
+            f"DocumentChunk.embedding VectorField has dimensions={field.dimensions}, "
+            f"expected {self.EXPECTED_DIM} (bge-small-zh-v1.5 output). "
+            "If you changed the embedding model, also update: "
+            "(1) VectorField(dimensions=N) in models.py, "
+            "(2) create a migration, "
+            "(3) update EXPECTED_DIM in this test, "
+            "(4) update all mock arrays to np.zeros((len(texts), N))."
+        )

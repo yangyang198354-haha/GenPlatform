@@ -83,3 +83,68 @@ Playwright 会抛出 `strict mode violation` 错误，导致 E2E 测试失败。
    ```
 3. 规范：所有可交互的上传控件、表单控件，在实现时应加上唯一的 `name` 或 `data-testid` 属性，
    便于 E2E 精确定位，避免后续扩展时选择器冲突。
+
+---
+
+## 经验五：Mock 形状陷阱 — 输出形状依赖输入时必须用 side_effect
+
+**日期**: 2026-04-16
+
+### 经验摘要
+`model.encode()` 等 ML 函数的输出形状依赖输入数量。用固定 `return_value = np.zeros((1, 512))` mock 时，多 chunk 文档只生成 1 个 chunk，其余被 `zip()` 截断——测试绿灯，生产静默丢失数据。
+
+### 错误做法
+```python
+mock_model.encode.return_value = np.zeros((1, 512), dtype="float32")  # 固定形状，危险！
+```
+
+### 正确做法
+```python
+mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
+```
+
+### 通用规则
+- 凡被 mock 的函数输出形状/内容依赖输入，必须用 `side_effect`
+- 适用：`model.encode(texts)`, `tokenizer(texts)`, `batch_predict(inputs)`
+
+---
+
+## 经验六：资源约束参数必须通过 call_args 断言验证
+
+**日期**: 2026-04-16
+
+### 经验摘要
+`model.encode()` 未传 `batch_size` → 大文档 OOM → SIGKILL → `except Exception` 全部绕过 → 文档永久停留 "processing"。测试只验证输出结果，无法感知 batch_size 缺失。
+
+### 正确做法
+```python
+_, call_kwargs = mock_model.encode.call_args
+assert call_kwargs.get("batch_size") == 32
+```
+
+### 通用规则
+- 涉及 RAM/线程/超时的调用，除验证输出，**还必须通过 `call_args` 断言约束参数本身**
+- 典型参数：`batch_size`, `max_workers`, `timeout`, `num_threads`
+
+---
+
+## 经验七：VectorField 维度 smoke test — 无需 DB 的一致性断言
+
+**日期**: 2026-04-16
+
+### 经验摘要
+模型切换（1024维→512维）时若 `VectorField(dimensions=)` 漏改，pgvector 拒绝 bulk_create。所有测试都 mock 了 encode 输出，无法检测此不匹配。
+
+### 正确做法
+```python
+class TestVectorFieldDimension:
+    EXPECTED_DIM = 512  # 与 bge-small-zh-v1.5 输出维度一致
+
+    def test_vector_field_dimension_matches_embedding_model(self):
+        from apps.knowledge_base.models import DocumentChunk
+        field = DocumentChunk._meta.get_field("embedding")
+        assert field.dimensions == self.EXPECTED_DIM
+```
+
+### 通用规则
+切换 embedding 模型时必须同 PR 修改四处：① VectorField(dimensions=N) ② migration ③ 本测试 EXPECTED_DIM ④ 所有 mock 数组形状。
