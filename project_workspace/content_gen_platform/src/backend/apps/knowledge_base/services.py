@@ -245,6 +245,9 @@ def search(user_id: int, query: str, top_k: int = 5) -> List[DocumentChunk]:
 
     # ── Layer 2: Anchor chunk injection ──────────────────────────────────────
     # Always include the first chunk of every document that had a semantic hit.
+    # Count anchors already captured by semantic search (chunk_index=0 in results)
+    # so they are protected from the final cap even when not injected separately.
+    semantic_anchor_count = sum(1 for c in semantic_results if c.chunk_index == 0)
     anchor_chunks: List[DocumentChunk] = list(
         base_qs
         .filter(document_id__in=hit_doc_ids, chunk_index=0)
@@ -268,7 +271,8 @@ def search(user_id: int, query: str, top_k: int = 5) -> List[DocumentChunk]:
 
     # ── Merge ────────────────────────────────────────────────────────────────
     # Order: semantic (ranked by relevance) → anchors → keyword extras.
-    # Cap total at top_k (semantic) + len(anchors) so we never drop an anchor.
+    # Cap accounts for ALL anchor chunks: separately injected ones AND those
+    # already present in semantic_results, so anchors are never silently dropped.
     combined = semantic_results + anchor_chunks + keyword_chunks
-    cap = top_k + len(anchor_chunks)
+    cap = top_k + len(anchor_chunks) + semantic_anchor_count
     return combined[:cap]
