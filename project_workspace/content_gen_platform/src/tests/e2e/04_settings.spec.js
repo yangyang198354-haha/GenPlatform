@@ -64,4 +64,53 @@ test.describe('System Settings', () => {
     await expect(page.getByText(/已保存|成功/)).toBeVisible({ timeout: 5000 });
   });
 
+  test('E2E-004x: Switching provider clears/restores API key field independently', async ({ page }) => {
+    await page.getByText('大语言模型').click();
+
+    // Step 1: fill DeepSeek key and save
+    await page.getByText('DeepSeek').click();
+    await page.getByPlaceholder('sk-...').fill('sk-deepseek-key-001');
+    await page.getByRole('button', { name: '保存' }).first().click();
+    await expect(page.getByText(/已保存|成功/)).toBeVisible({ timeout: 5000 });
+
+    // Step 2: switch to Volcano — API key field must NOT show DeepSeek's key
+    await page.getByText('火山引擎（豆包）').click();
+    const apiKeyAfterSwitch = await page.getByPlaceholder('sk-...').inputValue();
+    // Volcano has no saved key yet, so the field should be empty
+    expect(apiKeyAfterSwitch).toBe('');
+  });
+
+  test('E2E-004y: Each provider retains its own API key after round-trip switch', async ({ page }) => {
+    await page.getByText('大语言模型').click();
+
+    // Save DeepSeek key
+    await page.getByText('DeepSeek').click();
+    await page.getByPlaceholder('sk-...').fill('sk-deepseek-key-001');
+    await page.getByRole('button', { name: '保存' }).first().click();
+    await expect(page.getByText(/已保存|成功/)).toBeVisible({ timeout: 5000 });
+
+    // Save Volcano key
+    await page.getByText('火山引擎（豆包）').click();
+    await page.getByPlaceholder('sk-...').fill('sk-volcano-key-002');
+    await page.getByPlaceholder(/ep-/).fill('ep-test-20240101');
+    await page.getByRole('button', { name: '保存' }).first().click();
+    await expect(page.getByText(/已保存|成功/)).toBeVisible({ timeout: 5000 });
+
+    // Reload page to force onMounted re-fetch from backend
+    await page.reload();
+    await page.getByText('大语言模型').click();
+
+    // Verify DeepSeek key is shown under DeepSeek radio
+    await page.getByText('DeepSeek').click();
+    const deepseekKey = await page.getByPlaceholder('sk-...').inputValue();
+    expect(deepseekKey).toMatch(/^sk-/);
+
+    // Switch to Volcano — should show Volcano's own key (masked), NOT DeepSeek's
+    await page.getByText('火山引擎（豆包）').click();
+    const volcanoKey = await page.getByPlaceholder('sk-...').inputValue();
+    expect(volcanoKey).toMatch(/^sk-/);
+    // The two displayed keys must differ (they are separately stored)
+    expect(volcanoKey).not.toBe(deepseekKey);
+  });
+
 });

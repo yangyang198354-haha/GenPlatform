@@ -83,7 +83,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, watch } from "vue";
 import { ElMessage } from "element-plus";
 import { settingsAPI } from "@/api";
 
@@ -91,6 +91,25 @@ const activeTab = ref("llm");
 
 // ── LLM ─────────────────────────────────────────────────────────────────────
 const llmForm    = ref({ provider: "deepseek", api_key: "", model_name: "" });
+
+// 分别缓存两个 provider 的已保存配置（来自后端 config_preview），
+// 避免切换 provider 时互相覆盖同一个 api_key 字段。
+const llmSavedConfig = ref({
+  deepseek: { api_key: "" },
+  volcano:  { api_key: "", model_name: "" },
+});
+
+// 切换 provider 单选框时，从缓存中回填当前 provider 的 key
+watch(() => llmForm.value.provider, (newProvider) => {
+  if (newProvider === "deepseek") {
+    llmForm.value.api_key    = llmSavedConfig.value.deepseek.api_key;
+    llmForm.value.model_name = "";
+  } else {
+    llmForm.value.api_key    = llmSavedConfig.value.volcano.api_key;
+    llmForm.value.model_name = llmSavedConfig.value.volcano.model_name;
+  }
+});
+
 const savingLlm  = ref(false);
 const testingLlm = ref(false);
 
@@ -196,20 +215,37 @@ async function saveStorageConfig() {
 onMounted(async () => {
   try {
     const { data } = await settingsAPI.list();
+    // 记录哪些 provider 已配置，用于决定最终显示哪个
+    let hasDeepseek = false;
+    let hasVolcano  = false;
     for (const cfg of data) {
       const preview = cfg.config_preview || {};
       if (cfg.service_type === "llm_deepseek" && cfg.is_configured) {
-        llmForm.value.provider = "deepseek";
-        // preview 里 api_key 已脱敏（sk-xxxx****），仅用于显示状态
-        if (preview.api_key) llmForm.value.api_key = preview.api_key;
+        hasDeepseek = true;
+        // 将脱敏预览写入各自缓存，不直接覆盖 llmForm
+        if (preview.api_key) llmSavedConfig.value.deepseek.api_key = preview.api_key;
       } else if (cfg.service_type === "llm_volcano" && cfg.is_configured) {
-        llmForm.value.provider = "volcano";
-        if (preview.api_key)    llmForm.value.api_key    = preview.api_key;
-        if (preview.model_name) llmForm.value.model_name = preview.model_name;
+        hasVolcano = true;
+        if (preview.api_key)    llmSavedConfig.value.volcano.api_key    = preview.api_key;
+        if (preview.model_name) llmSavedConfig.value.volcano.model_name = preview.model_name;
       } else if (cfg.service_type === "jimeng" && cfg.is_configured) {
         if (preview.access_key) jimengForm.value.access_key = preview.access_key;
         if (preview.secret_key) jimengForm.value.secret_key = preview.secret_key;
       }
+    }
+    // 优先显示已配置的 provider；两者都有则保持默认（deepseek）
+    if (!hasDeepseek && hasVolcano) {
+      llmForm.value.provider = "volcano";
+    }
+    // 根据当前 provider 回填表单（watch 此时已注册，但首次设置 provider 可能未触发，
+    // 因此手动触发一次回填，确保表单显示正确的缓存值）
+    const p = llmForm.value.provider;
+    if (p === "deepseek") {
+      llmForm.value.api_key    = llmSavedConfig.value.deepseek.api_key;
+      llmForm.value.model_name = "";
+    } else {
+      llmForm.value.api_key    = llmSavedConfig.value.volcano.api_key;
+      llmForm.value.model_name = llmSavedConfig.value.volcano.model_name;
     }
   } catch (_) {
     // 首次使用，尚无配置，静默处理
