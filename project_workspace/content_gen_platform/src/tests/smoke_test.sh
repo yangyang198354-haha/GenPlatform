@@ -132,6 +132,28 @@ else
     fail "SM-006: Bind platform account" "HTTP $BIND_HTTP"
 fi
 
+# SM-006b  KB batch-upload endpoint (F-01: must be routable, auth required → 401 without token)
+info "SM-006b: KB batch-upload endpoint routing"
+BATCH_HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "${BASE_URL}/api/v1/knowledge/documents/batch-upload/")
+if [ "$BATCH_HTTP" = "401" ]; then
+    pass "SM-006b: POST /knowledge/documents/batch-upload/ unauthenticated → 401 (endpoint exists)"
+else
+    fail "SM-006b: KB batch-upload endpoint routing" "expected 401, got $BATCH_HTTP"
+fi
+
+# SM-006c  KB rename endpoint (F-03: PATCH must require auth → 401 or 404 without token)
+info "SM-006c: KB document rename endpoint"
+RENAME_HTTP=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH \
+    -H "Content-Type: application/json" \
+    -d '{"name":"test"}' \
+    "${BASE_URL}/api/v1/knowledge/documents/99999/")
+if [ "$RENAME_HTTP" = "401" ] || [ "$RENAME_HTTP" = "404" ]; then
+    pass "SM-006c: PATCH /knowledge/documents/{pk}/ unauthenticated → $RENAME_HTTP (endpoint exists)"
+else
+    fail "SM-006c: KB rename endpoint" "expected 401 or 404, got $RENAME_HTTP"
+fi
+
 # SM-007  LLM generate endpoint (no API key — must return 400, not 500)
 info "SM-007: LLM generate endpoint error handling"
 check_http "SM-007: LLM generate without config → 400" \

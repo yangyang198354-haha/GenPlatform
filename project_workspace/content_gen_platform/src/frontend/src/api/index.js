@@ -85,7 +85,12 @@ export const kbAPI = {
     api.post("/knowledge/documents/", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     }),
+  batchUpload: (formData) =>
+    api.post("/knowledge/documents/batch-upload/", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    }),
   search: (query) => api.get("/knowledge/documents/", { params: { search: query } }),
+  rename: (id, name) => api.patch(`/knowledge/documents/${id}/`, { name }),
   delete: (id) => api.delete(`/knowledge/documents/${id}/`),
 };
 

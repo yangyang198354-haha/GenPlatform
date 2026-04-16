@@ -20,3 +20,22 @@ class DocumentSerializer(serializers.ModelSerializer):
 
     def get_file_size_mb(self, obj):
         return round(obj.file_size_bytes / (1024**2), 2)
+
+
+class BatchUploadItemSerializer(serializers.Serializer):
+    """Represents a single file entry in a batch upload result."""
+
+    name = serializers.CharField()
+    document_id = serializers.IntegerField(required=False, allow_null=True)
+    status = serializers.CharField(required=False, allow_null=True)
+    reason = serializers.CharField(required=False, allow_null=True)
+
+
+class BatchUploadResultSerializer(serializers.Serializer):
+    """Response body for POST /documents/batch-upload/."""
+
+    accepted = BatchUploadItemSerializer(many=True)
+    skipped = BatchUploadItemSerializer(many=True)
+    rejected = BatchUploadItemSerializer(many=True)
+    quota_exhausted = serializers.BooleanField()
+    summary = serializers.CharField()

@@ -85,20 +85,22 @@ jobs:
         run: pip install -r requirements-ci.txt
 
       - name: Run unit tests
+        # --cov-fail-under=80 is a hard gate: this step fails (and blocks the pipeline)
+        # if branch coverage drops below 80%. continue-on-error is intentionally absent.
         run: |
           pytest apps/ \
             --cov=apps \
             --cov-report=xml \
+            --cov-report=term-missing \
             --cov-fail-under=80 \
             -m "not integration and not e2e" \
             -x -q
-        continue-on-error: true
 
       - uses: codecov/codecov-action@v4
         with:
           files: project_workspace/content_gen_platform/src/backend/coverage.xml
           flags: unit
-        continue-on-error: true
+        continue-on-error: true  # Codecov upload failure must not block the pipeline
 
   # Stage 3: Integration Tests
   test-integration:
