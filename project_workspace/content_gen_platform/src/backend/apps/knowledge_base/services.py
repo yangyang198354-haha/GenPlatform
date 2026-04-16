@@ -244,16 +244,20 @@ def search(user_id: int, query: str, top_k: int = 5) -> List[DocumentChunk]:
     hit_doc_ids: set[int] = {c.document_id for c in semantic_results}
 
     # ── Layer 2: Anchor chunk injection ──────────────────────────────────────
-    # Always include the first chunk of every document that had a semantic hit.
-    # Count anchors already captured by semantic search (chunk_index=0 in results)
-    # so they are protected from the final cap even when not injected separately.
-    semantic_anchor_count = sum(1 for c in semantic_results if c.chunk_index == 0)
-    anchor_chunks: List[DocumentChunk] = list(
-        base_qs
-        .filter(document_id__in=hit_doc_ids, chunk_index=0)
-        .exclude(pk__in=seen_pks)
+    # Always include chunk_index=0 of every document that had a semantic hit.
+    # "Natural top_k" = the first top_k semantic candidates (what pure semantic
+    # would return).  Anchors already inside the natural top_k are naturally
+    # included and do NOT consume an extra slot.  Only anchors that fall *outside*
+    # the natural top_k are force-injected as bonus entries.
+    natural_top_k_pks: set[int] = {c.pk for c in semantic_results[:top_k]}
+    all_anchor_chunks: List[DocumentChunk] = list(
+        base_qs.filter(document_id__in=hit_doc_ids, chunk_index=0)
     )
-    seen_pks.update(c.pk for c in anchor_chunks)
+    # Extra anchors: not already in the natural top_k (need a free slot)
+    extra_anchor_chunks: List[DocumentChunk] = [
+        c for c in all_anchor_chunks if c.pk not in natural_top_k_pks
+    ]
+    seen_pks.update(c.pk for c in extra_anchor_chunks)
 
     # ── Layer 3: Keyword fallback ─────────────────────────────────────────────
     keywords = _extract_cn_keywords(query)
@@ -270,9 +274,8 @@ def search(user_id: int, query: str, top_k: int = 5) -> List[DocumentChunk]:
         )
 
     # ── Merge ────────────────────────────────────────────────────────────────
-    # Order: semantic (ranked by relevance) → anchors → keyword extras.
-    # Cap accounts for ALL anchor chunks: separately injected ones AND those
-    # already present in semantic_results, so anchors are never silently dropped.
-    combined = semantic_results + anchor_chunks + keyword_chunks
-    cap = top_k + len(anchor_chunks) + semantic_anchor_count
-    return combined[:cap]
+    # natural top_k semantic results (hard cap = top_k)
+    # + extra anchor chunks that fell outside natural top_k (force-included)
+    # + keyword extras (deduped)
+    natural_results = semantic_results[:top_k]
+    return natural_results + extra_anchor_chunks + keyword_chunks
