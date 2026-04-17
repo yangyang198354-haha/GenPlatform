@@ -10,11 +10,13 @@ class DocumentSerializer(serializers.ModelSerializer):
         fields = (
             "id", "name", "original_filename", "file_type",
             "file_size_bytes", "file_size_mb", "status", "chunk_count",
-            "error_message", "created_at", "updated_at",
+            "error_message", "progress", "progress_message",
+            "created_at", "updated_at",
         )
         read_only_fields = (
             "id", "original_filename", "file_type", "file_size_bytes",
             "file_size_mb", "status", "chunk_count", "error_message",
+            "progress", "progress_message",
             "created_at", "updated_at",
         )
 

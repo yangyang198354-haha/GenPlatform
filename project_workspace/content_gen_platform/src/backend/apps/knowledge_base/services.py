@@ -128,25 +128,55 @@ def _chunk_text(text: str, chunk_size: int, overlap: int) -> List[str]:
     return [c for c in chunks if c.strip()]
 
 
+def _update_progress(document_id: int, progress: int, message: str) -> None:
+    """Update document progress fields in-place.
+
+    Called at each major processing stage so the frontend can show a
+    progress bar instead of a static "处理中" tag.
+    Only updates the two progress fields — does NOT touch status.
+    """
+    Document.objects.filter(pk=document_id).update(
+        progress=progress,
+        progress_message=message,
+    )
+
+
 def process_document(document_id: int) -> None:
     """
     Celery task body: extract text → chunk → embed → store in pgvector.
     Marks document status as 'available' on success, 'error' on failure.
+
+    Progress stages:
+      5  — task started, resetting state
+      20 — text extraction done
+      40 — text chunking done
+      60 — embedding model loaded
+      90 — embeddings computed, writing to DB
+     100 — finished (status → available)
     """
     try:
         doc = Document.objects.get(pk=document_id)
         doc.status = "processing"
-        doc.save(update_fields=["status"])
+        doc.progress = 5
+        doc.progress_message = "任务已开始"
+        doc.save(update_fields=["status", "progress", "progress_message"])
 
+        _update_progress(document_id, 10, "正在提取文本")
         text = _extract_text(doc.file_path, doc.file_type)
+        _update_progress(document_id, 20, "文本提取完成，正在切片")
+
         chunks = _chunk_text(text, settings.CHUNK_SIZE, settings.CHUNK_OVERLAP)
+        _update_progress(document_id, 40, f"切片完成（共 {len(chunks)} 个），正在加载向量模型")
 
         model = _get_embedding_model()
+        _update_progress(document_id, 60, f"正在计算向量嵌入（共 {len(chunks)} 个切片）")
+
         # batch_size=32 caps peak RAM: encoding all chunks at once can OOM
         # the worker when processing large documents (especially DOCX/PDF).
         embeddings = model.encode(
             chunks, batch_size=32, show_progress_bar=False, normalize_embeddings=True
         )
+        _update_progress(document_id, 90, "向量计算完成，正在写入数据库")
 
         # Delete existing chunks (re-processing case)
         DocumentChunk.objects.filter(document=doc).delete()
@@ -162,17 +192,24 @@ def process_document(document_id: int) -> None:
         ]
         DocumentChunk.objects.bulk_create(chunk_objects)
 
+        doc.refresh_from_db()
         doc.status = "available"
         doc.chunk_count = len(chunk_objects)
         doc.error_message = ""
-        doc.save(update_fields=["status", "chunk_count", "error_message"])
+        doc.progress = 100
+        doc.progress_message = "处理完成"
+        doc.save(update_fields=["status", "chunk_count", "error_message", "progress", "progress_message"])
         logger.info("Document %d processed: %d chunks", document_id, len(chunk_objects))
 
     except Document.DoesNotExist:
         logger.error("Document %d not found", document_id)
     except Exception as e:
         logger.exception("Document %d processing failed", document_id)
-        Document.objects.filter(pk=document_id).update(status="error", error_message=str(e))
+        Document.objects.filter(pk=document_id).update(
+            status="error",
+            error_message=str(e),
+            progress_message="处理失败",
+        )
 
 
 def _extract_cn_keywords(text: str) -> List[str]:

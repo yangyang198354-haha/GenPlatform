@@ -3,7 +3,9 @@ import os
 import pytest
 import numpy as np
 from unittest.mock import patch, MagicMock
-from apps.knowledge_base.services import _chunk_text, _extract_text, _ocr_pdf, process_document, search
+from apps.knowledge_base.services import (
+    _chunk_text, _extract_text, _ocr_pdf, process_document, search, _update_progress,
+)
 from apps.knowledge_base.models import Document, DocumentChunk
 
 
@@ -490,6 +492,73 @@ class TestProcessDocument:
         doc.refresh_from_db()
         assert doc.status == "error"
         assert doc.error_message != ""
+
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_process_document_sets_progress_100_on_success(self, mock_get_model, user, tmp_path):
+        """
+        On success, document.progress must be 100 and progress_message non-empty.
+
+        This is the key fix for the frontend "always processing" bug: the frontend
+        polls the document endpoint and stops when progress=100 / status=available.
+        """
+        mock_model = MagicMock()
+        mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
+        mock_get_model.return_value = mock_model
+
+        doc = self._make_doc(user, tmp_path)
+        process_document(doc.pk)
+
+        doc.refresh_from_db()
+        assert doc.progress == 100, (
+            f"progress must be 100 after success, got {doc.progress}. "
+            "The frontend polls this field to decide when to stop the progress bar."
+        )
+        assert doc.progress_message, "progress_message must be non-empty after processing"
+
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_process_document_progress_written_incrementally(self, mock_get_model, user, tmp_path):
+        """
+        _update_progress must be called multiple times during processing, not
+        just at the start and end.  This ensures the frontend progress bar
+        visibly advances through intermediate stages.
+        """
+        mock_model = MagicMock()
+        mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
+        mock_get_model.return_value = mock_model
+
+        doc = self._make_doc(user, tmp_path)
+
+        with patch("apps.knowledge_base.services._update_progress", wraps=_update_progress) as mock_prog:
+            process_document(doc.pk)
+
+        # Must have been called at least 3 times (text extraction, chunking, embedding, write)
+        assert mock_prog.call_count >= 3, (
+            f"_update_progress was called {mock_prog.call_count} times; "
+            "expected at least 3 incremental progress updates."
+        )
+
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_process_document_error_sets_progress_message(self, mock_get_model, user, db):
+        """
+        On failure, progress_message must be set to a non-empty string so the
+        frontend tooltip can display useful context alongside the error tag.
+        """
+        doc = Document.objects.create(
+            user=user,
+            name="bad doc",
+            original_filename="bad.txt",
+            file_path="/nonexistent/path/bad.txt",
+            file_size_bytes=100,
+            file_type="txt",
+            status="processing",
+        )
+        process_document(doc.pk)
+        doc.refresh_from_db()
+        assert doc.status == "error"
+        assert doc.progress_message, (
+            "progress_message must be set on error so the frontend tooltip shows "
+            "context alongside the 'failed' tag."
+        )
 
 
 # ── search ─────────────────────────────────────────────────────────────────

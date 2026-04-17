@@ -1,7 +1,7 @@
 <template>
   <div class="kb-view">
     <div class="page-header">
-      <h2>知识库</h2>
+      <h1>知识库</h1>
       <div class="header-actions">
         <el-button type="primary" :icon="IconPlus" @click="showUploadDialog = true">
           上传文档
@@ -39,9 +39,34 @@
       <el-table-column label="大小" width="100">
         <template #default="{ row }">{{ formatSize(row.file_size_bytes) }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="120">
+      <el-table-column label="状态" min-width="220">
         <template #default="{ row }">
-          <el-tag :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag>
+          <!-- Processing: show progress bar with stage message -->
+          <div v-if="row.status === 'processing'" class="status-processing">
+            <el-progress
+              :percentage="row.progress || 0"
+              :stroke-width="6"
+              status="striped"
+              striped-flow
+              :duration="10"
+              class="doc-progress"
+            />
+            <span class="progress-msg">{{ row.progress_message || '处理中…' }}</span>
+          </div>
+          <!-- Error: show tag + expandable message -->
+          <div v-else-if="row.status === 'error'" class="status-error">
+            <el-tag type="danger">失败</el-tag>
+            <el-tooltip
+              v-if="row.error_message"
+              :content="row.error_message"
+              placement="top"
+              :show-after="200"
+            >
+              <el-icon class="error-icon"><InfoFilled /></el-icon>
+            </el-tooltip>
+          </div>
+          <!-- Available -->
+          <el-tag v-else type="success">可用</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="chunk_count" label="分块数" width="90" />
@@ -104,13 +129,13 @@
 </template>
 
 <script setup>
-import { ref, markRaw, onMounted } from "vue";
+import { ref, markRaw, onMounted, onUnmounted } from "vue";
 import { ElMessage } from "element-plus";
-import { Plus, Search, Delete, UploadFilled, FolderOpened, EditPen } from "@element-plus/icons-vue";
+import { Plus, Search, Delete, UploadFilled, FolderOpened, EditPen, InfoFilled } from "@element-plus/icons-vue";
 import { kbAPI } from "@/api";
 
 // markRaw prevents Vue reactivity proxy from wrapping icon components,
-// avoiding TDZ errors in production builds (see kb entry SD-L014).
+// avoiding TDZ errors in production builds.
 const IconPlus = markRaw(Plus);
 const IconDelete = markRaw(Delete);
 const IconFolderOpened = markRaw(FolderOpened);
@@ -131,6 +156,67 @@ const renameTarget = ref(null);
 const renameValue = ref("");
 const renaming = ref(false);
 
+// ── Polling ──────────────────────────────────────────────────────────────────
+// Poll individual documents that are still in "processing" state.
+// Each entry: { docId, intervalId, retries }
+const _pollingMap = new Map();
+// Max consecutive poll failures before giving up on a single doc.
+const POLL_MAX_RETRIES = 60;
+// Poll interval in milliseconds.
+const POLL_INTERVAL_MS = 2000;
+
+function _startPolling(docId) {
+  if (_pollingMap.has(docId)) return; // already polling
+  let retries = 0;
+  const intervalId = setInterval(async () => {
+    retries += 1;
+    if (retries > POLL_MAX_RETRIES) {
+      _stopPolling(docId);
+      return;
+    }
+    try {
+      const { data } = await kbAPI.get(docId);
+      // Update the document in the reactive list in-place to avoid full re-render
+      const idx = documents.value.findIndex((d) => d.id === docId);
+      if (idx !== -1) {
+        documents.value[idx] = { ...documents.value[idx], ...data };
+      }
+      // Stop polling when terminal state is reached
+      if (data.status === "available" || data.status === "error") {
+        _stopPolling(docId);
+      }
+    } catch {
+      // Network error — keep polling, retries counter handles timeout
+    }
+  }, POLL_INTERVAL_MS);
+  _pollingMap.set(docId, intervalId);
+}
+
+function _stopPolling(docId) {
+  const id = _pollingMap.get(docId);
+  if (id !== undefined) {
+    clearInterval(id);
+    _pollingMap.delete(docId);
+  }
+}
+
+function _stopAllPolling() {
+  for (const [docId] of _pollingMap) {
+    _stopPolling(docId);
+  }
+}
+
+// Start polling for all documents currently in "processing" state.
+function _schedulePollingForProcessing() {
+  for (const doc of documents.value) {
+    if (doc.status === "processing") {
+      _startPolling(doc.id);
+    }
+  }
+}
+
+onUnmounted(_stopAllPolling);
+
 onMounted(() => fetchDocuments());
 
 async function fetchDocuments() {
@@ -138,6 +224,7 @@ async function fetchDocuments() {
   try {
     const { data } = await kbAPI.list();
     documents.value = data.results ?? data;
+    _schedulePollingForProcessing();
   } finally {
     loading.value = false;
   }
@@ -149,6 +236,7 @@ async function handleSearch() {
   try {
     const { data } = await kbAPI.search(searchQuery.value);
     documents.value = data.results ?? data;
+    _schedulePollingForProcessing();
   } finally {
     loading.value = false;
   }
@@ -167,11 +255,15 @@ async function customUpload({ file }) {
   formData.append("file", file);
   if (uploadTitle.value) formData.append("name", uploadTitle.value);
   try {
-    await kbAPI.upload(formData);
+    const { data: newDoc } = await kbAPI.upload(formData);
     ElMessage.success("上传成功，正在处理…");
     showUploadDialog.value = false;
     uploadTitle.value = "";
-    fetchDocuments();
+    // Prepend new doc to list and start polling immediately
+    documents.value = [newDoc, ...documents.value];
+    if (newDoc.status === "processing") {
+      _startPolling(newDoc.id);
+    }
   } catch (err) {
     const msg = err.response?.data?.error || "上传失败，请重试";
     ElMessage.error(msg);
@@ -179,9 +271,10 @@ async function customUpload({ file }) {
 }
 
 async function deleteDoc(id) {
+  _stopPolling(id);
   await kbAPI.delete(id);
   ElMessage.success("已删除");
-  fetchDocuments();
+  documents.value = documents.value.filter((d) => d.id !== id);
 }
 
 // ── Directory upload ──────────────────────────────────────────────────────
@@ -217,7 +310,8 @@ async function handleDirSelected(event) {
     } else {
       ElMessage.warning(data.summary || "没有文件成功入库");
     }
-    fetchDocuments();
+    // Re-fetch to get the newly created documents and start polling for them
+    await fetchDocuments();
   } catch (err) {
     const msg = err.response?.data?.error || "目录上传失败，请重试";
     ElMessage.error(msg);
@@ -258,11 +352,6 @@ async function confirmRename() {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-const statusType = (s) =>
-  ({ available: "success", processing: "warning", error: "danger" }[s] ?? "info");
-const statusLabel = (s) =>
-  ({ available: "可用", processing: "处理中", error: "失败" }[s] ?? s);
-
 function formatSize(bytes) {
   if (!bytes) return "-";
   return bytes < 1024 * 1024
@@ -283,8 +372,38 @@ function formatDate(iso) {
   align-items: center;
   margin-bottom: 20px;
 }
-.page-header h2 { margin: 0; }
+.page-header h1 { margin: 0; font-size: 1.4rem; }
 .header-actions { display: flex; gap: 8px; }
 .search-bar { margin-bottom: 16px; max-width: 400px; }
 .upload-title { margin-top: 12px; }
+
+/* Processing state: stacked progress bar + stage label */
+.status-processing {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
+}
+.doc-progress {
+  width: 100%;
+}
+.progress-msg {
+  font-size: 12px;
+  color: #909399;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Error state: tag + info icon */
+.status-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.error-icon {
+  color: #f56c6c;
+  cursor: pointer;
+  font-size: 16px;
+}
 </style>

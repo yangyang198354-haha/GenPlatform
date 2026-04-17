@@ -81,6 +81,7 @@ export const authAPI = {
 // ── Knowledge Base API ─────────────────────────────────────────────────────
 export const kbAPI = {
   list: (params) => api.get("/knowledge/documents/", { params }),
+  get: (id) => api.get(`/knowledge/documents/${id}/`),
   upload: (formData) =>
     api.post("/knowledge/documents/", formData, {
       headers: { "Content-Type": "multipart/form-data" },

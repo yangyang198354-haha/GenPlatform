@@ -16,6 +16,11 @@ class Document(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="processing")
     chunk_count = models.IntegerField(default=0)
     error_message = models.TextField(blank=True)
+    # Processing progress: 0-100 percentage, updated by Celery task at each stage.
+    # Used by the frontend to display a progress bar while status="processing".
+    progress = models.IntegerField(default=0)
+    # Human-readable description of the current processing stage, e.g. "正在提取文本".
+    progress_message = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

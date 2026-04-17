@@ -174,7 +174,9 @@ class TestProcessDocumentTaskIntegration:
         from unittest.mock import MagicMock
 
         mock_model = MagicMock()
-        mock_model.encode.return_value = np.zeros((1, 512), dtype="float32")
+        # Use side_effect so multi-chunk docs get the correct (N, 512) shape.
+        # A fixed (1, 512) return_value would silently truncate to 1 chunk via zip().
+        mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
         mock_get_model.return_value = mock_model
 
         doc = _make_doc(user, tmp_path, content="A short but valid text for chunking.")
@@ -192,10 +194,56 @@ class TestProcessDocumentTaskIntegration:
         from apps.knowledge_base.models import DocumentChunk
 
         mock_model = MagicMock()
-        mock_model.encode.return_value = np.zeros((1, 512), dtype="float32")
+        mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
         mock_get_model.return_value = mock_model
 
         doc = _make_doc(user, tmp_path, content="Another short text for test.")
         process_document_task(doc.pk)
 
         assert DocumentChunk.objects.filter(document=doc).exists()
+
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_eager_task_sets_progress_100_on_success(self, mock_get_model, user, tmp_path, db):
+        """
+        After successful processing, document.progress must be 100 and
+        document.progress_message must indicate completion.
+
+        Regression guard: ensures the Celery task writes progress fields
+        so the frontend progress bar can reach 100% and stop polling.
+        """
+        import numpy as np
+        from unittest.mock import MagicMock
+
+        mock_model = MagicMock()
+        mock_model.encode.side_effect = lambda texts, **kw: np.zeros((len(texts), 512), dtype="float32")
+        mock_get_model.return_value = mock_model
+
+        doc = _make_doc(user, tmp_path, content="Progress tracking test content.")
+        process_document_task(doc.pk)
+
+        doc.refresh_from_db()
+        assert doc.progress == 100, (
+            f"progress must be 100 after successful processing, got {doc.progress}. "
+            "The frontend uses this value to show the progress bar completion."
+        )
+        assert doc.progress_message, "progress_message must be non-empty after processing"
+
+    @patch("apps.knowledge_base.services._get_embedding_model")
+    def test_error_sets_progress_message(self, mock_get_model, user, tmp_path, db):
+        """
+        On failure, progress_message should indicate the error state so the
+        frontend tooltip can display meaningful information alongside the error tag.
+        """
+        import numpy as np
+        from unittest.mock import MagicMock
+
+        mock_model = MagicMock()
+        mock_model.encode.side_effect = RuntimeError("embedding model failure")
+        mock_get_model.return_value = mock_model
+
+        doc = _make_doc(user, tmp_path, content="Some text that will fail at embedding.")
+        process_document_task(doc.pk)
+
+        doc.refresh_from_db()
+        assert doc.status == "error"
+        assert doc.progress_message, "progress_message must be set on error for frontend display"
