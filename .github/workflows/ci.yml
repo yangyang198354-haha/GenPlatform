@@ -397,7 +397,7 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           password: ${{ secrets.PROD_PASSWORD }}
           envs: GHCR_TOKEN,GHCR_ACTOR
-          command_timeout: 60m
+          command_timeout: 90m
           script: |
             set -e
 
@@ -405,6 +405,30 @@ jobs:
             if ! command -v docker &>/dev/null; then
               curl -fsSL https://get.docker.com | sh
               systemctl enable --now docker
+            fi
+
+            # Configure Docker daemon to use NJU mirror for ghcr.io to speed up
+            # pulls from Aliyun servers (ghcr.io direct can be very slow from China)
+            DAEMON_CFG=/etc/docker/daemon.json
+            if ! grep -q "ghcr.nju.edu.cn" "$DAEMON_CFG" 2>/dev/null; then
+              echo "Configuring Docker registry mirror for ghcr.io..."
+              if [ -f "$DAEMON_CFG" ]; then
+                # Merge into existing config — add mirror key if not present
+                python3 - <<'PYEOF'
+import json, sys
+cfg = json.load(open("/etc/docker/daemon.json"))
+cfg.setdefault("registry-mirrors", [])
+mirror = "https://ghcr.nju.edu.cn"
+if mirror not in cfg["registry-mirrors"]:
+    cfg["registry-mirrors"].append(mirror)
+json.dump(cfg, open("/etc/docker/daemon.json", "w"), indent=2)
+PYEOF
+              else
+                printf '{"registry-mirrors": ["https://ghcr.nju.edu.cn"]}\n' \
+                  > "$DAEMON_CFG"
+              fi
+              systemctl reload docker || (systemctl restart docker && sleep 3)
+              echo "Docker daemon reloaded with registry mirror."
             fi
 
             # Ensure deploy directory exists (first deploy)
@@ -421,7 +445,7 @@ jobs:
               echo "INFO: .env created. Update ALLOWED_HOSTS and CORS_ALLOWED_ORIGINS with your domain."
             fi
 
-            # Login to GHCR
+            # Login to GHCR (also needed for authenticated pulls via mirror)
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
 
             # Free disk space: remove dangling images and stopped containers
