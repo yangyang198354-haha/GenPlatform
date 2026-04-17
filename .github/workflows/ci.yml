@@ -409,24 +409,9 @@ jobs:
 
             # Configure Docker daemon to use NJU mirror for ghcr.io to speed up
             # pulls from Aliyun servers (ghcr.io direct can be very slow from China)
-            DAEMON_CFG=/etc/docker/daemon.json
-            if ! grep -q "ghcr.nju.edu.cn" "$DAEMON_CFG" 2>/dev/null; then
+            if ! grep -q "ghcr.nju.edu.cn" /etc/docker/daemon.json 2>/dev/null; then
               echo "Configuring Docker registry mirror for ghcr.io..."
-              if [ -f "$DAEMON_CFG" ]; then
-                # Merge into existing config — add mirror key if not present
-                python3 - <<'PYEOF'
-import json, sys
-cfg = json.load(open("/etc/docker/daemon.json"))
-cfg.setdefault("registry-mirrors", [])
-mirror = "https://ghcr.nju.edu.cn"
-if mirror not in cfg["registry-mirrors"]:
-    cfg["registry-mirrors"].append(mirror)
-json.dump(cfg, open("/etc/docker/daemon.json", "w"), indent=2)
-PYEOF
-              else
-                printf '{"registry-mirrors": ["https://ghcr.nju.edu.cn"]}\n' \
-                  > "$DAEMON_CFG"
-              fi
+              echo '{"registry-mirrors":["https://ghcr.nju.edu.cn"]}' > /etc/docker/daemon.json
               systemctl reload docker || (systemctl restart docker && sleep 3)
               echo "Docker daemon reloaded with registry mirror."
             fi
