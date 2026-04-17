@@ -114,6 +114,81 @@ class TestDocumentBatchUploadView:
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
         assert "未包含受支持的文档" in resp.data["error"]
 
+    def test_batch_upload_all_files_quota_exceeded_returns_precise_error(
+        self, auth_client, user, settings, tmp_path
+    ):
+        """
+        Bug 2 regression: when ALL files are rejected due to quota exhaustion,
+        the 400 error message must say "存储配额不足" — NOT the generic
+        "未包含受支持的文档" which was previously returned and actively misled
+        the user about the actual failure reason.
+
+        Fix: views.py now branches on quota_exhausted flag to produce a
+        precise message distinguishing the three no-accepted-files scenarios.
+        """
+        settings.MEDIA_ROOT = str(tmp_path)
+        settings.MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024
+
+        # Set quota to zero so every file is rejected immediately
+        user.storage_quota_bytes = 0
+        user.used_storage_bytes = 0
+        user.save()
+
+        client, _ = auth_client
+        files = [
+            _fake_file("report.pdf", b"pdf content"),
+            _fake_file("notes.txt", b"notes"),
+        ]
+        resp = client.post(BATCH_URL, data={"files": files}, format="multipart")
+
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
+            f"Expected 400, got {resp.status_code}. Response: {resp.data}"
+        )
+        error = resp.data.get("error", "")
+        assert "配额" in error or "存储" in error, (
+            f"Error message must mention quota/storage exhaustion, got: {error!r}. "
+            "Bug 2 regression: generic '未包含受支持的文档' message misleads users."
+        )
+        # Must NOT return the generic format-not-supported message
+        assert "未包含受支持的文档" not in error, (
+            f"Must not use generic format message when real cause is quota. Got: {error!r}"
+        )
+
+    def test_batch_upload_all_files_too_large_returns_precise_error(
+        self, auth_client, settings, tmp_path
+    ):
+        """
+        Bug 2 regression: when ALL files exceed the size limit (and none are
+        skipped for format reasons), the 400 error must say "超过大小限制"
+        instead of the generic "未包含受支持的文档".
+
+        Without this fix, a user uploading a directory of valid-format files
+        that happen to all be >50 MB would see a completely misleading error
+        suggesting the files have wrong extensions.
+        """
+        settings.MEDIA_ROOT = str(tmp_path)
+        settings.MAX_DOCUMENT_SIZE_BYTES = 10  # 10 bytes limit for test speed
+
+        client, _ = auth_client
+        files = [
+            _fake_file("big_report.pdf", b"x" * 100),   # 100 bytes > 10-byte limit
+            _fake_file("big_notes.docx", b"y" * 200),   # 200 bytes > 10-byte limit
+        ]
+        resp = client.post(BATCH_URL, data={"files": files}, format="multipart")
+
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
+            f"Expected 400, got {resp.status_code}. Response: {resp.data}"
+        )
+        error = resp.data.get("error", "")
+        assert "大小" in error or "50MB" in error or "limit" in error.lower(), (
+            f"Error message must mention file size limit, got: {error!r}. "
+            "Bug 2 regression: should not return generic format-not-supported message."
+        )
+        # Must NOT return the generic format-not-supported message
+        assert "未包含受支持的文档" not in error, (
+            f"Must not use generic format message when real cause is file size. Got: {error!r}"
+        )
+
     def test_batch_upload_no_files_returns_400(self, auth_client):
         """Empty request body → HTTP 400."""
         client, _ = auth_client

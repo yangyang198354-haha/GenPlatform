@@ -9,13 +9,20 @@ from .services import process_document as _process_document
 
 logger = logging.getLogger(__name__)
 
-# 5-minute soft limit: raises SoftTimeLimitExceeded (caught below → status="error")
-# instead of letting the worker be SIGKILL'd by the OS OOM killer, which bypasses
-# all Python exception handlers and leaves the document stuck in "processing".
-_SOFT_TIME_LIMIT = 300
+# Soft limit: raises SoftTimeLimitExceeded in Python (caught below → status="error")
+# instead of letting the worker be SIGKILL'd by the OS OOM killer.
+_SOFT_TIME_LIMIT = 600   # 10 min — covers first-run embedding model download (~400 MB)
+
+# Hard limit: SIGKILL sent by Celery if the task is still running after this many
+# seconds.  Must be slightly larger than soft_time_limit so SoftTimeLimitExceeded
+# has time to run the status="error" handler before the hard kill arrives.
+# Previously _SOFT_TIME_LIMIT was 300 s, which was too short for the first-run
+# model download on a slow or cold ECS server — the task was killed before it could
+# finish, leaving the document in "processing" indefinitely.
+_TIME_LIMIT = 660        # 11 min — 60 s grace period after soft limit fires
 
 
-@shared_task(bind=True, max_retries=0, soft_time_limit=_SOFT_TIME_LIMIT)
+@shared_task(bind=True, max_retries=0, soft_time_limit=_SOFT_TIME_LIMIT, time_limit=_TIME_LIMIT)
 def process_document_task(self, document_id: int) -> None:
     """Async document processing: extract → chunk → embed.
 
@@ -42,7 +49,8 @@ def process_document_task(self, document_id: int) -> None:
         )
         Document.objects.filter(pk=document_id).update(
             status="error",
-            error_message="处理超时，请重试或联系管理员（文档可能过大）",
+            error_message="处理超时（超过10分钟），请重试或联系管理员（文档可能过大或服务器繁忙）",
+            progress_message="处理超时",
         )
     except Exception as exc:
         # Fallback: if _process_document raised unexpectedly (e.g. DB down),

@@ -129,7 +129,7 @@
 </template>
 
 <script setup>
-import { ref, markRaw, onMounted, onUnmounted } from "vue";
+import { ref, markRaw, onMounted, onUnmounted, onActivated } from "vue";
 import { ElMessage } from "element-plus";
 import { Plus, Search, Delete, UploadFilled, FolderOpened, EditPen, InfoFilled } from "@element-plus/icons-vue";
 import { kbAPI } from "@/api";
@@ -161,7 +161,12 @@ const renaming = ref(false);
 // Each entry: { docId, intervalId, retries }
 const _pollingMap = new Map();
 // Max consecutive poll failures before giving up on a single doc.
-const POLL_MAX_RETRIES = 60;
+// Set to 300 (300 × 2 s = 10 min) to cover the first-run case where the
+// Celery worker needs to download the embedding model (~400 MB) before it
+// can process the first document.  With the old value of 60 (= 120 s) the
+// frontend stopped polling before the worker finished, leaving the status
+// card stuck at "处理中" even though the document eventually became available.
+const POLL_MAX_RETRIES = 300;
 // Poll interval in milliseconds.
 const POLL_INTERVAL_MS = 2000;
 
@@ -171,7 +176,19 @@ function _startPolling(docId) {
   const intervalId = setInterval(async () => {
     retries += 1;
     if (retries > POLL_MAX_RETRIES) {
+      // Polling timed out — do a final fetch to get the latest status.
+      // The document may have become "available" or "error" after the last
+      // successful poll; this prevents a permanent "processing" display.
       _stopPolling(docId);
+      try {
+        const { data } = await kbAPI.get(docId);
+        const idx = documents.value.findIndex((d) => d.id === docId);
+        if (idx !== -1) {
+          documents.value[idx] = { ...documents.value[idx], ...data };
+        }
+      } catch {
+        // Best-effort: ignore errors on the final catch-up fetch.
+      }
       return;
     }
     try {
@@ -215,9 +232,33 @@ function _schedulePollingForProcessing() {
   }
 }
 
-onUnmounted(_stopAllPolling);
+// Resume polling when the tab/page becomes visible again (e.g. user switched
+// tabs while a document was processing and returned later).  Without this,
+// documents that finished processing while the tab was hidden would show the
+// stale "processing" state indefinitely.
+function _handleVisibilityChange() {
+  if (document.visibilityState === "visible") {
+    // Re-fetch the list to pick up any status changes that happened while hidden,
+    // then restart polling for any docs still in "processing".
+    fetchDocuments();
+  }
+}
 
-onMounted(() => fetchDocuments());
+onUnmounted(() => {
+  _stopAllPolling();
+  document.removeEventListener("visibilitychange", _handleVisibilityChange);
+});
+
+// onActivated fires when the component is re-activated inside a <KeepAlive>
+// wrapper (if used).  It mirrors the onMounted behaviour for cached components.
+onActivated(() => {
+  fetchDocuments();
+});
+
+onMounted(() => {
+  fetchDocuments();
+  document.addEventListener("visibilitychange", _handleVisibilityChange);
+});
 
 async function fetchDocuments() {
   loading.value = true;

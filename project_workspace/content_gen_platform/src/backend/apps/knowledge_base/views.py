@@ -193,10 +193,20 @@ class DocumentBatchUploadView(APIView):
                 "status": "processing",
             })
 
-        # If no files were successfully accepted, return 400
+        # If no files were successfully accepted, return 400 with a precise
+        # error message so the user knows whether the issue is file format,
+        # size, or storage quota — rather than a generic "no supported files"
+        # message that is actively misleading when the real cause is quota.
         if not accepted:
+            if quota_exhausted:
+                error_msg = "存储配额不足，所有文件均未能导入，请删除部分文档后重试"
+            elif rejected:
+                error_msg = "所有文件均超过大小限制（50MB），未能导入"
+            else:
+                # All files were skipped due to unsupported format.
+                error_msg = "所选目录中未包含受支持的文档"
             return Response(
-                {"error": "所选目录中未包含受支持的文档"},
+                {"error": error_msg},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

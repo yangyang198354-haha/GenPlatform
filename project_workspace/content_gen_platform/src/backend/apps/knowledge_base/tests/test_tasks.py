@@ -13,7 +13,7 @@ import pytest
 from unittest.mock import patch
 
 from apps.knowledge_base.models import Document
-from apps.knowledge_base.tasks import process_document_task
+from apps.knowledge_base.tasks import process_document_task, _SOFT_TIME_LIMIT, _TIME_LIMIT
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -56,6 +56,42 @@ class TestProcessDocumentTaskConfig:
         sig = inspect.signature(process_document_task.run)
         params = list(sig.parameters.keys())
         assert "document_id" in params
+
+    def test_soft_time_limit_is_600_seconds(self):
+        """
+        Regression guard: soft_time_limit must be 600 s (10 min) to accommodate
+        first-run embedding model download (~400 MB on a cold ECS server).
+
+        Previously this was 300 s, which was too short — the task was SIGKILL'd
+        before the model finished loading, leaving the document stuck in
+        'processing' indefinitely.
+        """
+        assert _SOFT_TIME_LIMIT == 600, (
+            f"_SOFT_TIME_LIMIT must be 600 s (10 min), got {_SOFT_TIME_LIMIT}. "
+            "Possible regression: reducing this value can cause first-run model "
+            "downloads to be killed, leaving documents stuck at 'processing'."
+        )
+
+    def test_hard_time_limit_is_660_seconds(self):
+        """
+        Regression guard: hard time_limit must be > soft_time_limit to give the
+        SoftTimeLimitExceeded handler 60 s to write the 'error' status before
+        the SIGKILL arrives.
+
+        If time_limit <= soft_time_limit, the OS kills the worker before the
+        error handler can run, and the document is left in 'processing' forever.
+        """
+        assert _TIME_LIMIT == 660, (
+            f"_TIME_LIMIT must be 660 s (11 min), got {_TIME_LIMIT}. "
+            "Must be larger than _SOFT_TIME_LIMIT to allow the error handler to run."
+        )
+
+    def test_hard_limit_exceeds_soft_limit(self):
+        """Hard kill must always fire after the soft limit to allow cleanup."""
+        assert _TIME_LIMIT > _SOFT_TIME_LIMIT, (
+            f"_TIME_LIMIT ({_TIME_LIMIT}) must be > _SOFT_TIME_LIMIT ({_SOFT_TIME_LIMIT}). "
+            "Otherwise SIGKILL arrives before SoftTimeLimitExceeded can mark the doc 'error'."
+        )
 
 
 # ── fallback error handler ─────────────────────────────────────────────────
@@ -156,6 +192,32 @@ class TestProcessDocumentTaskFallback:
                     "self.retry() must not be called. "
                     "Regression of 3f108ae: retrying resets status to 'processing'."
                 )
+
+    def test_soft_time_limit_error_message_mentions_timeout_duration(self, user, tmp_path, db):
+        """
+        Regression guard (Bug 1): the error_message written on SoftTimeLimitExceeded
+        must mention the timeout duration (10 minutes) so users know why processing
+        failed and whether to retry.
+
+        Previously the message was a generic "处理超时" with no duration info.
+        After the fix: "处理超时（超过10分钟），请重试或联系管理员..."
+        """
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        doc = _make_doc(user, tmp_path)
+
+        with patch(
+            "apps.knowledge_base.tasks._process_document",
+            side_effect=SoftTimeLimitExceeded(),
+        ):
+            process_document_task(doc.pk)
+
+        doc.refresh_from_db()
+        assert doc.status == "error"
+        # Must mention 10 minutes so users have actionable context
+        assert "10" in doc.error_message or "分钟" in doc.error_message, (
+            f"error_message should mention timeout duration (10/分钟), got: {doc.error_message!r}"
+        )
 
 
 # ── integration: task processes document end-to-end ───────────────────────

@@ -78,7 +78,26 @@ services:
       - model_cache:/root/.cache/huggingface
     depends_on:
       - backend
-    command: celery -A config worker -l info -Q default,video,publish -c 2
+    # Pre-warm the embedding model before starting the worker so the first
+    # document upload does not trigger a cold model download (~400 MB) inside
+    # a Celery task.  Without pre-warming, the download stalls long enough to
+    # exhaust the task's soft_time_limit, leaving the document in "processing".
+    #
+    # The warm-up script imports SentenceTransformer and calls encode() on a
+    # dummy string; this forces the model weights to be written to the shared
+    # model_cache volume so subsequent worker restarts skip the download.
+    command: >
+      sh -c "python -c \"
+      import os, django; os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings.production');
+      django.setup();
+      from django.conf import settings;
+      from sentence_transformers import SentenceTransformer;
+      print('Pre-warming embedding model:', settings.EMBEDDING_MODEL);
+      m = SentenceTransformer(settings.EMBEDDING_MODEL, device=settings.EMBEDDING_DEVICE);
+      m.encode(['warm-up']);
+      print('Embedding model ready.')
+      \" &&
+      celery -A config worker -l info -Q default,video,publish -c 2"
 
   celery_beat:
     image: ghcr.io/yangyang198354-haha/genplatform/backend:latest
