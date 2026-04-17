@@ -31,11 +31,11 @@ test.describe('System Settings', () => {
 
     await page.getByText('大语言模型').click();
     // Both radio options should be visible and selectable
-    await expect(page.getByText('DeepSeek')).toBeVisible();
-    await expect(page.getByText('火山引擎')).toBeVisible();
+    await expect(page.getByText('DeepSeek', { exact: true })).toBeVisible();
+    await expect(page.getByText('火山引擎（豆包）', { exact: true })).toBeVisible();
 
     // Click Volcano radio
-    await page.getByText('火山引擎（豆包）').click();
+    await page.getByText('火山引擎（豆包）', { exact: true }).click();
     // Model ID field should appear
     await expect(page.getByPlaceholder(/ep-/)).toBeVisible();
 
@@ -58,7 +58,7 @@ test.describe('System Settings', () => {
 
   test('E2E-004d: Save valid DeepSeek config', async ({ page }) => {
     await page.getByText('大语言模型').click();
-    await page.getByText('DeepSeek').click();
+    await page.getByText('DeepSeek', { exact: true }).click();
     await page.getByPlaceholder('sk-...').fill('sk-test-e2e-key-12345');
     await page.getByRole('button', { name: '保存' }).first().click();
     await expect(page.getByText(/已保存|成功/)).toBeVisible({ timeout: 5000 });
@@ -68,13 +68,13 @@ test.describe('System Settings', () => {
     await page.getByText('大语言模型').click();
 
     // Step 1: fill DeepSeek key and save
-    await page.getByText('DeepSeek').click();
+    await page.getByText('DeepSeek', { exact: true }).click();
     await page.getByPlaceholder('sk-...').fill('sk-deepseek-key-001');
     await page.getByRole('button', { name: '保存' }).first().click();
     await expect(page.getByText(/已保存|成功/)).toBeVisible({ timeout: 5000 });
 
     // Step 2: switch to Volcano — API key field must NOT show DeepSeek's key
-    await page.getByText('火山引擎（豆包）').click();
+    await page.getByText('火山引擎（豆包）', { exact: true }).click();
     const apiKeyAfterSwitch = await page.getByPlaceholder('sk-...').inputValue();
     // Volcano has no saved key yet, so the field should be empty
     expect(apiKeyAfterSwitch).toBe('');
@@ -84,13 +84,13 @@ test.describe('System Settings', () => {
     await page.getByText('大语言模型').click();
 
     // Save DeepSeek key
-    await page.getByText('DeepSeek').click();
+    await page.getByText('DeepSeek', { exact: true }).click();
     await page.getByPlaceholder('sk-...').fill('sk-deepseek-key-001');
     await page.getByRole('button', { name: '保存' }).first().click();
     await expect(page.getByText(/已保存|成功/)).toBeVisible({ timeout: 5000 });
 
     // Save Volcano key
-    await page.getByText('火山引擎（豆包）').click();
+    await page.getByText('火山引擎（豆包）', { exact: true }).click();
     await page.getByPlaceholder('sk-...').fill('sk-volcano-key-002');
     await page.getByPlaceholder(/ep-/).fill('ep-test-20240101');
     await page.getByRole('button', { name: '保存' }).first().click();
@@ -106,7 +106,7 @@ test.describe('System Settings', () => {
     // Verify DeepSeek key is shown under DeepSeek radio.
     // After reload the form defaults to deepseek; clicking the radio is a no-op
     // but ensures we're reading the right field.
-    await page.getByText('DeepSeek').click();
+    await page.getByText('DeepSeek', { exact: true }).click();
     // Wait for the api_key field to be populated (onMounted backfill may still
     // be setting reactivity after networkidle)
     await expect(page.getByPlaceholder('sk-...')).not.toHaveValue('', { timeout: 5000 });
@@ -114,7 +114,7 @@ test.describe('System Settings', () => {
     expect(deepseekKey).toMatch(/^sk-/);
 
     // Switch to Volcano — should show Volcano's own key (masked), NOT DeepSeek's
-    await page.getByText('火山引擎（豆包）').click();
+    await page.getByText('火山引擎（豆包）', { exact: true }).click();
     await expect(page.getByPlaceholder('sk-...')).not.toHaveValue('', { timeout: 5000 });
     const volcanoKey = await page.getByPlaceholder('sk-...').inputValue();
     expect(volcanoKey).toMatch(/^sk-/);
@@ -124,14 +124,15 @@ test.describe('System Settings', () => {
 
   test('E2E-004z: DeepSeek model selection and params saved and restored after reload', async ({ page }) => {
     await page.getByText('大语言模型').click();
-    await page.getByText('DeepSeek').click();
+    await page.getByText('DeepSeek', { exact: true }).click();
 
     // Fill API key
     await page.getByPlaceholder('sk-...').fill('sk-test-deepseek-model-e2e');
 
     // Select deepseek-reasoner from the model dropdown
     await page.locator('.el-select').first().click();
-    await page.getByText('deepseek-reasoner（DeepSeek-R1，推理模型）').click();
+    // ElementPlus teleports the dropdown list — use .first() to target the list item
+    await page.getByText('deepseek-reasoner（DeepSeek-R1，推理模型）').first().click();
 
     // Set temperature to 0.5 — target el-input-number by surrounding form-item label
     const temperatureInputNumber = page.locator('.el-form-item').filter({ hasText: 'Temperature' }).locator('input').first();
@@ -151,7 +152,7 @@ test.describe('System Settings', () => {
     await page.reload();
     await page.waitForLoadState('networkidle');
     await page.getByText('大语言模型').click();
-    await page.getByText('DeepSeek').click();
+    await page.getByText('DeepSeek', { exact: true }).click();
 
     // Model dropdown should show deepseek-reasoner
     await expect(page.locator('.el-select').first()).toContainText('deepseek-reasoner');
@@ -159,7 +160,7 @@ test.describe('System Settings', () => {
 
   test('E2E-004w: Volcano model selection and params saved and restored after reload', async ({ page }) => {
     await page.getByText('大语言模型').click();
-    await page.getByText('火山引擎（豆包）').click();
+    await page.getByText('火山引擎（豆包）', { exact: true }).click();
 
     // Fill API key and endpoint ID
     await page.getByPlaceholder('sk-...').fill('sk-test-volcano-model-e2e');
@@ -168,7 +169,8 @@ test.describe('System Settings', () => {
     // Select Doubao-pro-32k from the doubao model dropdown
     // The doubao model select is the first el-select in volcano section
     await page.locator('.el-select').first().click();
-    await page.getByText('Doubao-pro-32k（专业版，32K 上下文）').click();
+    // ElementPlus teleports the dropdown list — use .first() to target the list item
+    await page.getByText('Doubao-pro-32k（专业版，32K 上下文）').first().click();
 
     // Save
     await page.getByRole('button', { name: '保存' }).first().click();
@@ -178,7 +180,7 @@ test.describe('System Settings', () => {
     await page.reload();
     await page.waitForLoadState('networkidle');
     await page.getByText('大语言模型').click();
-    await page.getByText('火山引擎（豆包）').click();
+    await page.getByText('火山引擎（豆包）', { exact: true }).click();
 
     // Doubao model dropdown should show Doubao-pro-32k
     await expect(page.locator('.el-select').first()).toContainText('Doubao-pro-32k');
