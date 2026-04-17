@@ -42,7 +42,8 @@ test.describe('Knowledge Base', () => {
     });
 
     // Should show success message immediately after upload
-    await expect(page.getByText(/上传成功|处理中|已上传/)).toBeVisible({ timeout: 15_000 });
+    // Use .first() because toast and table row progress text can match simultaneously
+    await expect(page.getByText(/上传成功|处理中|已上传/).first()).toBeVisible({ timeout: 15_000 });
 
     // The newly uploaded document should appear in the table with a processing or available status tag
     // (backend may finish quickly in E2E env)
@@ -70,7 +71,7 @@ test.describe('Knowledge Base', () => {
     });
 
     // Wait for upload success message
-    await expect(page.getByText(/上传成功|处理中/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(/上传成功|处理中/).first()).toBeVisible({ timeout: 15_000 });
 
     // Either a progress bar (processing) or a success tag (available) should be shown
     // Depending on how fast the backend processes the file in E2E environment

@@ -1,7 +1,6 @@
 <template>
   <div class="kb-view">
     <div class="page-header">
-      <h1>知识库</h1>
       <div class="header-actions">
         <el-button type="primary" :icon="IconPlus" @click="showUploadDialog = true">
           上传文档

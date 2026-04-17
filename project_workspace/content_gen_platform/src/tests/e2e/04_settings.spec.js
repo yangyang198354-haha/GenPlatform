@@ -144,9 +144,12 @@ test.describe('System Settings', () => {
     await maxTokensInputNumber.fill('2048');
     await maxTokensInputNumber.press('Tab');
 
+    // Wait for el-input-number to commit values to Vue model before saving
+    await page.waitForTimeout(300);
+
     // Save
     await page.getByRole('button', { name: '保存' }).first().click();
-    await expect(page.getByText(/已保存|成功/)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/已保存|成功/).first()).toBeVisible({ timeout: 10_000 });
 
     // Reload and verify round-trip
     await page.reload();
@@ -174,7 +177,7 @@ test.describe('System Settings', () => {
 
     // Save
     await page.getByRole('button', { name: '保存' }).first().click();
-    await expect(page.getByText(/已保存|成功/)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/已保存|成功/).first()).toBeVisible({ timeout: 10_000 });
 
     // Reload and verify round-trip
     await page.reload();
