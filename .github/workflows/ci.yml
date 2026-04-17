@@ -397,7 +397,7 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           password: ${{ secrets.PROD_PASSWORD }}
           envs: GHCR_TOKEN,GHCR_ACTOR
-          command_timeout: 30m
+          command_timeout: 60m
           script: |
             set -e
 
