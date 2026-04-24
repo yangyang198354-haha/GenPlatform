@@ -5,6 +5,7 @@ from django.conf import settings
 from rest_framework import generics, status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
 from .models import Document
@@ -15,6 +16,18 @@ from apps.accounts.models import User
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "txt", "md"}
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB fallback (settings overrides this)
+
+
+class DocumentStatusThrottle(UserRateThrottle):
+    """Relaxed throttle for document status polling (GET /documents/{id}/).
+
+    The frontend polls every 5 s for up to 10 min (POLL_MAX_RETRIES=120),
+    producing at most 120 requests per document per polling session.
+    Allow 120/minute so even concurrent polling of several documents never
+    triggers a 429.
+    """
+
+    scope = "document_status"
 
 
 class DocumentListCreateView(generics.ListCreateAPIView):
@@ -240,6 +253,9 @@ class DocumentBatchUploadView(APIView):
 
 class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = DocumentSerializer
+    # Override the global UserRateThrottle with a scope that allows high-frequency
+    # status polling without hitting the 429 limit on the shared "user" bucket.
+    throttle_classes = [DocumentStatusThrottle]
 
     def get_queryset(self):
         return Document.objects.filter(user=self.request.user)

@@ -157,22 +157,25 @@ const renaming = ref(false);
 
 // ── Polling ──────────────────────────────────────────────────────────────────
 // Poll individual documents that are still in "processing" state.
-// Each entry: { docId, intervalId, retries }
+// Each entry: { docId, intervalId, retries, backoffUntil }
 const _pollingMap = new Map();
-// Max consecutive poll failures before giving up on a single doc.
-// Set to 300 (300 × 2 s = 10 min) to cover the first-run case where the
-// Celery worker needs to download the embedding model (~400 MB) before it
-// can process the first document.  With the old value of 60 (= 120 s) the
-// frontend stopped polling before the worker finished, leaving the status
-// card stuck at "处理中" even though the document eventually became available.
-const POLL_MAX_RETRIES = 300;
-// Poll interval in milliseconds.
-const POLL_INTERVAL_MS = 2000;
+// Max retries before giving up on a single doc.
+// 120 × 5 s = 600 s = 10 min — covers the first-run embedding-model download.
+const POLL_MAX_RETRIES = 120;
+// Base poll interval in milliseconds.  5 s keeps well within the backend
+// DocumentStatusThrottle (120/min) even when several docs are polled at once.
+const POLL_INTERVAL_MS = 5000;
 
 function _startPolling(docId) {
   if (_pollingMap.has(docId)) return; // already polling
   let retries = 0;
+  // backoffUntil: timestamp (ms) before which poll ticks are skipped after a 429.
+  let backoffUntil = 0;
+
   const intervalId = setInterval(async () => {
+    // Honour exponential back-off after a 429.
+    if (Date.now() < backoffUntil) return;
+
     retries += 1;
     if (retries > POLL_MAX_RETRIES) {
       // Polling timed out — do a final fetch to get the latest status.
@@ -201,8 +204,13 @@ function _startPolling(docId) {
       if (data.status === "available" || data.status === "error") {
         _stopPolling(docId);
       }
-    } catch {
-      // Network error — keep polling, retries counter handles timeout
+    } catch (err) {
+      if (err.response?.status === 429) {
+        // Exponential back-off: wait 30 s on first 429, doubling up to 120 s.
+        const waited = Math.min(30000 * Math.pow(2, retries - 1), 120000);
+        backoffUntil = Date.now() + waited;
+      }
+      // Other network errors — keep polling; retries counter handles timeout.
     }
   }, POLL_INTERVAL_MS);
   _pollingMap.set(docId, intervalId);

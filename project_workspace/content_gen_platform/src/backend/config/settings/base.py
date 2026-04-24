@@ -125,7 +125,8 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "user": "100/hour",
+        "user": "1000/hour",
+        "document_status": "120/minute",
         "llm_generate": "10/minute",
         "publish": "30/hour",
     },
