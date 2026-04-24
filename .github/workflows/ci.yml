@@ -219,6 +219,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: "npm"
+          cache-dependency-path: project_workspace/content_gen_platform/src/frontend/package-lock.json
 
       - name: Install dependencies
         run: npm install
@@ -280,8 +282,8 @@ jobs:
           tags: |
             ${{ env.IMAGE_BASE }}/backend:${{ github.sha }}
             ${{ env.IMAGE_BASE }}/backend:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE_BASE }}/backend:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_BASE }}/backend:buildcache,mode=max
 
       - name: Build & push frontend image (amd64)
         uses: docker/build-push-action@v5
@@ -292,8 +294,8 @@ jobs:
           tags: |
             ${{ env.IMAGE_BASE }}/frontend:${{ github.sha }}
             ${{ env.IMAGE_BASE }}/frontend:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE_BASE }}/frontend:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_BASE }}/frontend:buildcache,mode=max
 
   # Stage 6: Validate production image before deploy
   # Catches boot failures, broken migrations, and import errors in CI
@@ -551,6 +553,7 @@ jobs:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
     needs: smoke-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     defaults:
       run:
         working-directory: project_workspace/content_gen_platform/src/tests
@@ -563,6 +566,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: "npm"
+          cache-dependency-path: project_workspace/content_gen_platform/src/tests/package-lock.json
 
       - name: Install dependencies
         run: npm install
