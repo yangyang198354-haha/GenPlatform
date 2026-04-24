@@ -1,6 +1,7 @@
 """Global pytest fixtures shared across all test modules."""
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -12,6 +13,48 @@ from apps.media_library.models import MediaItem
 from apps.image_generator.models import ImageGenerationRequest
 
 User = get_user_model()
+
+
+@pytest.fixture(autouse=True)
+def disable_throttling(monkeypatch):
+    """Disable all throttling for every test.
+
+    ``test.py`` sets ``DEFAULT_THROTTLE_CLASSES = []``, which disables the
+    *global* DRF throttle.  However, views that declare their own
+    ``throttle_classes`` at the class level — currently ``MediaItemListView``
+    (scope "media_list", 300/min) and ``DocumentDetailView`` (scope
+    "document_status", 120/min) — are not affected by that setting; they
+    continue to write per-user counters into the shared LocMemCache.
+
+    Because LocMemCache is process-local and does *not* participate in
+    database transactions, those counters survive test teardown and can
+    accumulate if the same user PK is reused across tests (e.g. between
+    separate local test-session runs).
+
+    This fixture has two complementary effects:
+      1. It patches the view-level ``throttle_classes`` to ``[]``, so the
+         throttle check is bypassed entirely for both views.
+      2. It clears the cache before each test as a belt-and-suspenders guard
+         against any other cached state interfering with throttle logic.
+    """
+    # Belt-and-suspenders: clear any leftover throttle counters from previous
+    # test runs (or from the same session if PKs happen to be reused).
+    cache.clear()
+
+    # Patch view-level throttle_classes so they don't bypass the global [] override.
+    # Use try/except for knowledge_base in case the app is excluded from
+    # INSTALLED_APPS (e.g. local SQLite runs via local_test.py that strip
+    # apps.knowledge_base because pgvector is unavailable on SQLite).
+    monkeypatch.setattr(
+        "apps.media_library.views.MediaItemListView.throttle_classes", []
+    )
+    try:
+        monkeypatch.setattr(
+            "apps.knowledge_base.views.DocumentDetailView.throttle_classes", []
+        )
+    except Exception:
+        pass  # knowledge_base may be unavailable in SQLite-only local runs
+    yield
 
 
 # ── Users ──────────────────────────────────────────────────────────────────
