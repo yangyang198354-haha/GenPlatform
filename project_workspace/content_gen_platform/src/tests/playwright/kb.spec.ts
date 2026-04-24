@@ -21,8 +21,12 @@ import { test, expect, type Page } from '@playwright/test';
 
 let _counter = 0;
 
+/**
+ * Include process.pid so that when workers=2 in CI each Playwright worker
+ * process (different pids) generates distinct emails even at the same timestamp.
+ */
 function uniqueEmail(): string {
-  return `kb_e2e_${Date.now()}_${++_counter}@test.internal`;
+  return `kb_e2e_${process.pid}_${Date.now()}_${++_counter}@test.internal`;
 }
 
 async function registerAndLogin(
@@ -119,8 +123,11 @@ test.describe('KB-03: 单文件上传流程', () => {
     // Open upload dialog
     await page.getByRole('button', { name: /上传文档/ }).click();
 
-    // Locate the hidden file input inside the el-upload component
-    const fileInput = page.locator('input[type="file"]').first();
+    // The page has TWO input[type="file"] elements: one inside the el-upload
+    // dialog and one hidden directory picker (webkitdirectory) outside the dialog.
+    // Scope to [role="dialog"] to avoid accidentally targeting the directory picker,
+    // which would fail silently (file never actually uploaded).
+    const fileInput = page.locator('[role="dialog"] input[type="file"]').first();
 
     await fileInput.setInputFiles({
       name: 'e2e_test_upload.txt',
@@ -160,9 +167,11 @@ test.describe('KB-04: 文档重命名', () => {
     await registerAndLogin(page, uniqueEmail());
     await page.goto('/knowledge-base');
 
-    // Upload a document first so there is something to rename
+    // Upload a document first so there is something to rename.
+    // Scope to [role="dialog"] to avoid selecting the hidden directory picker
+    // (webkitdirectory input) that also lives on the page.
     await page.getByRole('button', { name: /上传文档/ }).click();
-    const fileInput = page.locator('input[type="file"]').first();
+    const fileInput = page.locator('[role="dialog"] input[type="file"]').first();
     await fileInput.setInputFiles({
       name: originalName,
       mimeType: 'text/plain',
@@ -224,7 +233,8 @@ test.describe('KB-05: 用户隔离验证', () => {
       await page.goto('/knowledge-base');
 
       await page.getByRole('button', { name: /上传文档/ }).click();
-      const fileInput = page.locator('input[type="file"]').first();
+      // Scope to dialog to avoid the hidden webkitdirectory picker
+      const fileInput = page.locator('[role="dialog"] input[type="file"]').first();
       await fileInput.setInputFiles({
         name: docName,
         mimeType: 'text/plain',

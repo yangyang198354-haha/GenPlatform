@@ -5,10 +5,17 @@
 let _counter = 0;
 
 /**
- * Generate a unique test email to avoid collisions between parallel runs.
+ * Generate a unique test email to avoid collisions between parallel worker
+ * processes (workers=2 in CI).  Each Playwright worker runs in its own Node
+ * process, so a plain module-level counter would reset to 0 in every worker,
+ * producing identical emails when two workers happen to call uniqueEmail() in
+ * the same millisecond.
+ *
+ * Fix: include process.pid in the email so worker-1 (pid 12345) and worker-2
+ * (pid 12346) can never generate the same address even at identical timestamps.
  */
 export function uniqueEmail() {
-  return `e2e_${Date.now()}_${++_counter}@test.internal`;
+  return `e2e_${process.pid}_${Date.now()}_${++_counter}@test.internal`;
 }
 
 /**

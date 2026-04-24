@@ -13,8 +13,10 @@ test.describe('System Settings', () => {
   });
 
   test('E2E-004a: Settings page shows LLM and Jimeng tabs', async ({ page }) => {
-    // Use h1 to avoid strict-mode collision with nav sidebar text
-    await expect(page.locator('h1').filter({ hasText: '系统设置' })).toBeVisible();
+    // SettingsView renders <h2>系统设置</h2> (not h1).
+    // Use h2 to match the actual DOM; filter is kept to avoid collisions with
+    // nav sidebar link text "系统设置" which is an <a>, not a heading.
+    await expect(page.locator('h2').filter({ hasText: '系统设置' })).toBeVisible();
     await expect(page.getByText('大语言模型')).toBeVisible();
     await expect(page.getByText('即梦 API')).toBeVisible();
     await expect(page.getByText('存储设置')).toBeVisible();
