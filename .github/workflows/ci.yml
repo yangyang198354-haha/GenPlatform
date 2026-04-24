@@ -161,8 +161,14 @@ jobs:
         run: python manage.py migrate --run-syncdb
 
       - name: Run integration tests
+        # Scan both tests/ (cross-module integration flows IT-001..IT-005) and
+        # apps/ (app-level integration tests such as KB upload→vector chain and
+        # batch-upload regression tests).
+        # Previously only tests/ was scanned, so all KB integration tests in
+        # apps/knowledge_base/tests/ were silently skipped, allowing regressions
+        # to reach production undetected.
         run: |
-          pytest tests/ \
+          pytest tests/ apps/ \
             --cov=apps \
             --cov-report=xml \
             -m integration \

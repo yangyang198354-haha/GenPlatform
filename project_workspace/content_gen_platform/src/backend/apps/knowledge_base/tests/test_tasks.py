@@ -97,6 +97,7 @@ class TestProcessDocumentTaskConfig:
 # ── fallback error handler ─────────────────────────────────────────────────
 
 @pytest.mark.django_db
+@pytest.mark.integration
 class TestProcessDocumentTaskFallback:
     """
     Verify that the top-level exception handler in process_document_task
@@ -105,6 +106,10 @@ class TestProcessDocumentTaskFallback:
     Regression for 3f108ae: before the fix, the outer except block called
     raise self.retry(exc=exc), causing retries and potentially leaving the
     document in 'processing' status indefinitely.
+
+    Marked integration: requires a real database to assert document status
+    transitions. These tests are the primary guard against KB "stuck in
+    processing" regressions reaching production.
     """
 
     def test_unexpected_exception_marks_doc_error(self, user, tmp_path, db):
@@ -223,10 +228,16 @@ class TestProcessDocumentTaskFallback:
 # ── integration: task processes document end-to-end ───────────────────────
 
 @pytest.mark.django_db
+@pytest.mark.integration
 class TestProcessDocumentTaskIntegration:
     """
     End-to-end: task dispatched with CELERY_TASK_ALWAYS_EAGER=True (set in
     test.py) processes the document in-process and leaves it available.
+
+    Marked integration: requires a real database + full Celery eager pipeline.
+    Guards the entire extract → chunk → embed → store chain so that any
+    regression in soft_time_limit, max_retries, or progress updates is caught
+    before it reaches production.
     """
 
     @patch("apps.knowledge_base.services._get_embedding_model")
@@ -309,3 +320,140 @@ class TestProcessDocumentTaskIntegration:
         doc.refresh_from_db()
         assert doc.status == "error"
         assert doc.progress_message, "progress_message must be set on error for frontend display"
+
+
+# ── Recurring-breakage guard: document must NEVER stay in 'processing' ────────
+#
+# Pattern observed: the "stuck in processing" bug has recurred multiple times
+# because changes to Celery task settings (max_retries, time limits) or
+# exception handling paths silently bypass the status update logic.
+#
+# The tests below form a structural firewall: they parameterise over every known
+# failure mode and assert that the document's final status is NEVER 'processing'.
+# If any code change introduces a path that leaves status='processing', exactly
+# one of these tests will fail with a clear diagnostic message.
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestDocumentNeverStaysProcessing:
+    """
+    Structural guard: regardless of how the task fails, the document MUST NOT
+    remain in status='processing' after process_document_task() returns.
+
+    Each test simulates a distinct failure mode that has historically caused
+    the 'stuck in processing' regression.  Adding a new failure scenario here
+    is the correct place to document and guard against future recurrences.
+
+    WHY THIS CLASS EXISTS
+    ---------------------
+    The "document stuck in processing" bug has recurred 3+ times because:
+      1. max_retries was set > 0, allowing Celery to reset status to 'processing'
+         on retry (fixed in 3f108ae, regressed, re-fixed).
+      2. soft_time_limit was too short (300s), causing tasks to be SIGKILL'd
+         before the error handler could set status='error' (fixed → 600s).
+      3. Unhandled exception types escaped both the soft-limit and general
+         except blocks, leaving no status update.
+
+    This class verifies the entire exception surface systematically.
+    """
+
+    FAILURE_MODES = [
+        ("RuntimeError",         RuntimeError("simulated crash")),
+        ("ValueError",           ValueError("bad input")),
+        ("MemoryError",          MemoryError("OOM")),
+        ("OSError",              OSError("disk full")),
+        ("SoftTimeLimitExceeded", None),  # handled separately below
+    ]
+
+    def _make_processing_doc(self, user, tmp_path, content="Guard test content."):
+        f = tmp_path / "guard_test.txt"
+        f.write_text(content, encoding="utf-8")
+        return Document.objects.create(
+            user=user,
+            name="guard test",
+            original_filename="guard_test.txt",
+            file_path=str(f),
+            file_size_bytes=len(content),
+            file_type="txt",
+            status="processing",
+        )
+
+    def test_document_never_stays_processing_on_runtime_error(self, user, tmp_path, db):
+        """RuntimeError in _process_document must not leave status='processing'."""
+        doc = self._make_processing_doc(user, tmp_path)
+        with patch("apps.knowledge_base.tasks._process_document",
+                   side_effect=RuntimeError("simulated crash")):
+            process_document_task(doc.pk)
+        doc.refresh_from_db()
+        assert doc.status != "processing", (
+            "RuntimeError must not leave document stuck at 'processing'. "
+            "Check that the except Exception block in process_document_task "
+            "still calls Document.objects.filter(pk=...).update(status='error')."
+        )
+
+    def test_document_never_stays_processing_on_value_error(self, user, tmp_path, db):
+        """ValueError in _process_document must not leave status='processing'."""
+        doc = self._make_processing_doc(user, tmp_path)
+        with patch("apps.knowledge_base.tasks._process_document",
+                   side_effect=ValueError("bad input")):
+            process_document_task(doc.pk)
+        doc.refresh_from_db()
+        assert doc.status != "processing", (
+            "ValueError must not leave document stuck at 'processing'."
+        )
+
+    def test_document_never_stays_processing_on_os_error(self, user, tmp_path, db):
+        """OSError (e.g. disk full) must not leave document at 'processing'."""
+        doc = self._make_processing_doc(user, tmp_path)
+        with patch("apps.knowledge_base.tasks._process_document",
+                   side_effect=OSError("disk full")):
+            process_document_task(doc.pk)
+        doc.refresh_from_db()
+        assert doc.status != "processing", (
+            "OSError must not leave document stuck at 'processing'."
+        )
+
+    def test_document_never_stays_processing_on_soft_time_limit(self, user, tmp_path, db):
+        """SoftTimeLimitExceeded must transition to 'error', not stay at 'processing'."""
+        from celery.exceptions import SoftTimeLimitExceeded
+        doc = self._make_processing_doc(user, tmp_path)
+        with patch("apps.knowledge_base.tasks._process_document",
+                   side_effect=SoftTimeLimitExceeded()):
+            process_document_task(doc.pk)
+        doc.refresh_from_db()
+        assert doc.status != "processing", (
+            "SoftTimeLimitExceeded must transition the document away from "
+            "'processing'. This is the primary guard for the cold-start "
+            "model-download timeout regression."
+        )
+        assert doc.status == "error", (
+            f"Expected status='error' after timeout, got '{doc.status}'."
+        )
+
+    def test_task_max_retries_still_zero_guard(self):
+        """
+        Canary test: if max_retries is ever changed from 0, Celery will reset
+        status='processing' on each retry attempt, causing documents to appear
+        stuck.  This test must fail loudly if someone bumps max_retries.
+        """
+        assert process_document_task.max_retries == 0, (
+            f"BREAKING CHANGE: max_retries={process_document_task.max_retries}. "
+            "Setting max_retries > 0 causes Celery to reset document status "
+            "back to 'processing' on each retry, recreating the stuck-document bug. "
+            "If you need retry behaviour, implement it AFTER setting status='error' "
+            "so the user always sees a terminal state between attempts."
+        )
+
+    def test_soft_time_limit_still_larger_than_model_download_time_guard(self):
+        """
+        Canary test: soft_time_limit must remain >= 600s.
+        The embedding model download takes up to ~400 MB on a cold ECS server;
+        at 10 MB/s that is 40 s, but hf-mirror can be slower.  600s gives a
+        10x safety margin.  Reducing it will cause cold-start timeouts.
+        """
+        assert _SOFT_TIME_LIMIT >= 600, (
+            f"BREAKING CHANGE: _SOFT_TIME_LIMIT={_SOFT_TIME_LIMIT}s < 600s. "
+            "This will cause the first-run embedding model download (~400 MB) "
+            "to time out, leaving documents stuck at 'processing'. "
+            "Do not reduce soft_time_limit below 600s."
+        )

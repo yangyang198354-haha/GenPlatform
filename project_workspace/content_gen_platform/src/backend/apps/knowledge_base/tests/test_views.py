@@ -181,6 +181,7 @@ class TestDocumentDetailView:
 # ── End-to-end chain: upload → Celery task → DocumentChunks in DB ─────────
 
 @pytest.mark.django_db
+@pytest.mark.integration
 class TestUploadToVectorChainIntegration:
     """
     Full pipeline integration test:
@@ -192,6 +193,10 @@ class TestUploadToVectorChainIntegration:
             → _get_embedding_model mock returns 512-dim vectors
             → DocumentChunk rows bulk-created in the database
             → Document status updated to 'available'
+
+    Marked integration: this is the primary guard against the "document stuck
+    in processing" regression.  It exercises the COMPLETE upload→process chain
+    and must run in CI's integration stage (with a real PostgreSQL + pgvector).
 
     This test is the only one that verifies the COMPLETE chain without
     mocking the Celery task itself.  All previous tests either mock the

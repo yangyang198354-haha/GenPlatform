@@ -33,8 +33,14 @@ def _fake_file(name="test.txt", content=b"Hello world", size=None):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.django_db
+@pytest.mark.integration
 class TestDocumentBatchUploadView:
-    """US-001, US-002, US-003 — batch upload endpoint."""
+    """US-001, US-002, US-003 — batch upload endpoint.
+
+    Marked integration: requires a real database and the full Django REST
+    stack.  These tests are the primary guard for the batch-upload flow
+    including quota exhaustion and size-limit error messaging.
+    """
 
     @patch("apps.knowledge_base.views.process_document_task")
     def test_batch_upload_success_creates_documents(
@@ -346,6 +352,7 @@ class TestDocumentBatchUploadView:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.django_db
+@pytest.mark.integration
 class TestUserIsolation:
     """US-004, US-005, US-006 — all KB operations respect user boundaries."""
 
@@ -470,6 +477,7 @@ class TestUserIsolation:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.django_db
+@pytest.mark.integration
 class TestFilenameDefaultAndRename:
     """US-007, US-008 — single-file upload naming and PATCH rename."""
 
@@ -611,6 +619,7 @@ class TestFilenameDefaultAndRename:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @pytest.mark.django_db
+@pytest.mark.integration
 class TestSearchUserIsolation:
     """
     US-006: search() must not return DocumentChunks belonging to other users.

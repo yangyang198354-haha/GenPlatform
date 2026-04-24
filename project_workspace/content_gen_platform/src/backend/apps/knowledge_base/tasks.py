@@ -31,10 +31,16 @@ def process_document_task(self, document_id: int) -> None:
     to avoid retrying after the document status has already been set to
     'error' — retrying would silently reset it to 'processing' again.
 
-    soft_time_limit=300 ensures that if the task exceeds 5 minutes
-    (e.g. model loading hangs or encoding a huge document takes too long),
-    SoftTimeLimitExceeded is raised and the document is marked 'error'
-    rather than being left in 'processing' indefinitely.
+    soft_time_limit=600s (10 min) covers the worst-case first-run scenario:
+    the Celery worker must download BAAI/bge-small-zh-v1.5 (~90 MB via
+    hf-mirror before processing any document.  On a cold ECS server behind GFW
+    this download can take several minutes.  Previously 300s was too short and
+    caused SoftTimeLimitExceeded to fire mid-download, leaving the document in
+    'processing' indefinitely (the SIGKILL arrived before the error handler ran).
+
+    If SoftTimeLimitExceeded fires, the except block below sets status='error'
+    with a user-visible message so the frontend shows 'failed' instead of
+    displaying a stuck progress bar forever.
     """
     try:
         _process_document(document_id)

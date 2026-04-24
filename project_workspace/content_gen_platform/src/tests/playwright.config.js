@@ -2,7 +2,11 @@
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
-  testDir: './e2e',
+  // Include both the legacy e2e/ directory (JS specs) and the newer
+  // playwright/ directory (TypeScript specs such as kb.spec.ts).
+  // Previously only './e2e' was listed, so kb.spec.ts was never executed.
+  testDir: '.',
+  testMatch: ['e2e/**/*.spec.{js,ts}', 'playwright/**/*.spec.{js,ts}'],
   timeout: 30_000,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,

@@ -18,9 +18,13 @@ test.describe('Knowledge Base', () => {
   });
 
   test('E2E-002a: Knowledge base page loads with empty state', async ({ page }) => {
-    // Use h1 to avoid strict-mode collision with nav-label and h2
-    await expect(page.locator('h1').filter({ hasText: '知识库' })).toBeVisible();
+    // KnowledgeBaseView does not render its own <h1> — the AppLayout topbar
+    // renders the page title via <h1 class="page-title">.  Using a bare h1
+    // locator here would resolve to 2 elements (strict-mode violation, see
+    // feedback_e2e_playwright_patterns.md Rule 1).
+    // Instead, assert on the Upload button which is always present and unique.
     await expect(page.getByRole('button', { name: /上传文档/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /上传目录/ })).toBeVisible();
   });
 
   test('E2E-002b: Upload dialog opens on button click', async ({ page }) => {
@@ -33,8 +37,11 @@ test.describe('Knowledge Base', () => {
   test('E2E-002c: Upload a text document and see progress', async ({ page }) => {
     await page.getByRole('button', { name: /上传文档/ }).click();
 
-    // Use name="file" to target the single-file input, not the directory input (webkitdirectory)
-    const fileInput = page.locator('input[name="file"]');
+    // The upload dialog contains an el-upload component whose hidden file input
+    // does NOT have a name attribute.  The directory picker (webkitdirectory)
+    // is outside the dialog.  Target the input inside the open dialog to avoid
+    // matching the directory picker which is rendered outside the dialog element.
+    const fileInput = page.locator('[role="dialog"] input[type="file"]').first();
     await fileInput.setInputFiles({
       name: 'test_doc.txt',
       mimeType: 'text/plain',
@@ -63,7 +70,8 @@ test.describe('Knowledge Base', () => {
   test('E2E-002e: Processing document shows progress bar', async ({ page }) => {
     await page.getByRole('button', { name: /上传文档/ }).click();
 
-    const fileInput = page.locator('input[name="file"]');
+    // Same locator strategy as 002c: target the input inside the dialog
+    const fileInput = page.locator('[role="dialog"] input[type="file"]').first();
     await fileInput.setInputFiles({
       name: 'progress_test.txt',
       mimeType: 'text/plain',
