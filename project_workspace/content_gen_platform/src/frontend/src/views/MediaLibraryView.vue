@@ -272,8 +272,15 @@ const fetchItems = async () => {
     }
     total.value = data.count ?? newItems.length
   } catch (err) {
-    const msg = err.response?.data?.error || '加载素材库失败，请刷新重试'
-    ElMessage.error(msg)
+    if (err.response?.status === 429) {
+      // Back off and retry once after the server-indicated wait time (or 10 s default).
+      const retryAfter = parseInt(err.response.headers?.['retry-after'] || '10', 10)
+      ElMessage.warning(`请求过于频繁，将在 ${retryAfter} 秒后自动重试`)
+      setTimeout(() => fetchItems(), retryAfter * 1000)
+    } else {
+      const msg = err.response?.data?.error || '加载素材库失败，请刷新重试'
+      ElMessage.error(msg)
+    }
   } finally {
     loading.value = false
   }

@@ -8,6 +8,7 @@ from django.shortcuts import redirect
 from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
+from rest_framework.throttling import UserRateThrottle
 from rest_framework.views import APIView
 
 from core.pagination import StandardResultsSetPagination
@@ -15,6 +16,19 @@ from .models import MediaItem
 from .serializers import MediaItemSerializer
 
 logger = logging.getLogger(__name__)
+
+
+class MediaListThrottle(UserRateThrottle):
+    """Dedicated throttle for the media library listing endpoint.
+
+    The listing page is loaded on every visit and every filter-tab switch.
+    Using a separate scope (300/minute) prevents the media list from
+    exhausting the shared global 'user' quota (1000/hour) when users
+    browse quickly or open multiple tabs.
+    """
+
+    scope = "media_list"
+
 
 # Allowed MIME types per media type
 ALLOWED_TYPES = {
@@ -33,6 +47,8 @@ MAX_SIZES = {
 
 class MediaItemListView(APIView):
     """GET /api/v1/media/ — list the authenticated user's media items."""
+
+    throttle_classes = [MediaListThrottle]
 
     def get(self, request):
         qs = MediaItem.objects.filter(owner=request.user)

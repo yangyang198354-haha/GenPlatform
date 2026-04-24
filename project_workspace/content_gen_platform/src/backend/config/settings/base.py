@@ -127,6 +127,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "user": "1000/hour",
         "document_status": "120/minute",
+        "media_list": "300/minute",
         "llm_generate": "10/minute",
         "publish": "30/hour",
     },
