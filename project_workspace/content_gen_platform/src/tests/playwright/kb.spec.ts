@@ -148,9 +148,11 @@ test.describe('KB-03: 单文件上传流程', () => {
       ),
     });
 
-    // Wait for success feedback
+    // Wait for success feedback. Status text can appear in both the upload
+    // dialog and the document table simultaneously — use .first() to avoid
+    // Playwright's strict-mode "resolved to N elements" error.
     await expect(
-      page.getByText(/上传成功|处理中|已上传/),
+      page.getByText(/上传成功|处理中|已上传/).first(),
     ).toBeVisible({ timeout: 15_000 });
 
     // Close dialog if still open
@@ -189,7 +191,7 @@ test.describe('KB-04: 文档重命名', () => {
       buffer: Buffer.from('Rename test content.'),
     });
     await expect(
-      page.getByText(/上传成功|处理中|已上传/),
+      page.getByText(/上传成功|处理中|已上传/).first(),
     ).toBeVisible({ timeout: 15_000 });
 
     // Close dialog
@@ -252,7 +254,7 @@ test.describe('KB-05: 用户隔离验证', () => {
         buffer: Buffer.from('User A private document content.'),
       });
       await expect(
-        page.getByText(/上传成功|处理中|已上传/),
+        page.getByText(/上传成功|处理中|已上传/).first(),
       ).toBeVisible({ timeout: 15_000 });
 
       // Confirm document appears for user_a

@@ -10,6 +10,10 @@ test.describe('System Settings', () => {
   test.beforeEach(async ({ page }) => {
     await registerAndLogin(page, uniqueEmail());
     await page.goto('/settings');
+    // Wait for onMounted's settingsAPI.list() to finish before any interaction.
+    // Without this, the async API response can race with test inputs and reset
+    // user-typed form values (e.g. the Volcano endpoint ID field).
+    await page.waitForLoadState('networkidle');
   });
 
   test('E2E-004a: Settings page shows LLM and Jimeng tabs', async ({ page }) => {
