@@ -423,7 +423,7 @@ jobs:
           target: /opt/content-gen-platform
           strip_components: 3
 
-      - name: Deploy on production server
+      - name: Pull images on production server (with retry)
         uses: appleboy/ssh-action@v1.0.3
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -433,7 +433,7 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           password: ${{ secrets.PROD_PASSWORD }}
           envs: GHCR_TOKEN,GHCR_ACTOR
-          command_timeout: 90m
+          command_timeout: 120m
           script: |
             set -e
 
@@ -443,16 +443,43 @@ jobs:
               systemctl enable --now docker
             fi
 
-            # Configure Docker daemon to use NJU mirror for ghcr.io to speed up
-            # pulls from Aliyun servers (ghcr.io direct can be very slow from China)
-            if ! grep -q "ghcr.nju.edu.cn" /etc/docker/daemon.json 2>/dev/null; then
-              echo "Configuring Docker registry mirror for ghcr.io..."
-              echo '{"registry-mirrors":["https://ghcr.nju.edu.cn"]}' > /etc/docker/daemon.json
-              systemctl reload docker || (systemctl restart docker && sleep 3)
-              echo "Docker daemon reloaded with registry mirror."
-            fi
+            # Always write the NJU mirror config so it stays current across deploys.
+            # ghcr.io direct pulls can be very slow (~KB/s) from Aliyun ECS in China.
+            echo '{"registry-mirrors":["https://ghcr.nju.edu.cn"]}' > /etc/docker/daemon.json
+            systemctl reload docker 2>/dev/null || (systemctl restart docker && sleep 5)
 
-            # Ensure deploy directory exists (first deploy)
+            # Login to GHCR (required for authenticated pulls via mirror)
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+
+            # Free disk space before pulling (~2 GB backend image)
+            docker system prune -f
+
+            # Pull with retry. Docker caches completed layers so each retry only
+            # re-downloads the layer that failed/stalled — retries are fast.
+            for attempt in 1 2 3; do
+              echo "Pull attempt $attempt/3..."
+              if docker compose -f /opt/content-gen-platform/docker-compose.yml pull; then
+                echo "Pull succeeded on attempt $attempt"
+                exit 0
+              fi
+              if [ "$attempt" -lt 3 ]; then
+                echo "Pull attempt $attempt failed, retrying in 30s..."
+                sleep 30
+              fi
+            done
+            echo "ERROR: docker compose pull failed after 3 attempts"
+            exit 1
+
+      - name: Deploy on production server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          password: ${{ secrets.PROD_PASSWORD }}
+          command_timeout: 20m
+          script: |
+            set -e
+
             mkdir -p /opt/content-gen-platform
             cd /opt/content-gen-platform
 
@@ -466,15 +493,7 @@ jobs:
               echo "INFO: .env created. Update ALLOWED_HOSTS and CORS_ALLOWED_ORIGINS with your domain."
             fi
 
-            # Login to GHCR (also needed for authenticated pulls via mirror)
-            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
-
-            # Free disk space: remove dangling images and stopped containers
-            # before pulling new images (backend image includes PyTorch, ~2 GB)
-            docker system prune -f
-
-            # Pull latest images & restart
-            docker compose pull
+            # Images already pulled in the previous step — start/update containers
             docker compose up -d --remove-orphans
 
             # Remove images no longer referenced by any container (old versions)
