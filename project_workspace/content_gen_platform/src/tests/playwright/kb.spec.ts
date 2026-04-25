@@ -62,17 +62,28 @@ async function loginExisting(
 }
 
 async function logout(page: Page): Promise<void> {
-  // Try a logout button / link; fall back to clearing storage
-  const logoutBtn = page.getByRole('button', { name: /退出|注销|Logout/i });
-  if (await logoutBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
-    await logoutBtn.click();
+  // AppLayout renders the logout option inside an el-dropdown (not a plain
+  // button), so getByRole('button') would never match it.  Click the
+  // avatar-trigger to open the dropdown, then click the menu item.
+  const avatarTrigger = page.locator('.avatar-trigger');
+  if (await avatarTrigger.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await avatarTrigger.click();
+    // el-dropdown-item renders as a list item, not a button — use getByText
+    await page.getByText('退出登录').click();
     await page.waitForURL(/\/login/, { timeout: 5_000 });
   } else {
+    // Hard fallback: clear storage AND do a full page reload so that the
+    // Pinia auth store (which lives in JS memory, not localStorage) is also
+    // reset.  Without the reload the store still reports isAuthenticated=true
+    // and the router guard would redirect the next registerAndLogin() call
+    // straight to /workspace, bypassing the registration form.
     await page.evaluate(() => {
       localStorage.clear();
       sessionStorage.clear();
     });
-    await page.goto('/login');
+    // Navigate to login with a full page load (not an SPA route change) so
+    // Pinia reinitialises from the now-empty localStorage.
+    await page.goto('/login', { waitUntil: 'networkidle' });
   }
 }
 
