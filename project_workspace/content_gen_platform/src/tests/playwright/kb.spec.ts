@@ -155,11 +155,12 @@ test.describe('KB-03: 单文件上传流程', () => {
       page.getByText(/上传成功|处理中|已上传/).first(),
     ).toBeVisible({ timeout: 15_000 });
 
-    // Close dialog if still open
-    const closeBtn = page.getByRole('button', { name: /关闭|取消/ }).last();
-    if (await closeBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await closeBtn.click();
-    }
+    // Close dialog if still open. The dialog may auto-close after upload
+    // success; using isVisible+click creates a TOCTOU race where the button
+    // enters a closing CSS animation between the two calls. Use a short
+    // timeout and catch instead.
+    await page.getByRole('button', { name: /关闭|取消/ }).last()
+      .click({ timeout: 3_000 }).catch(() => {});
 
     // The document name must appear in the table
     await expect(
@@ -194,11 +195,9 @@ test.describe('KB-04: 文档重命名', () => {
       page.getByText(/上传成功|处理中|已上传/).first(),
     ).toBeVisible({ timeout: 15_000 });
 
-    // Close dialog
-    const closeBtn = page.getByRole('button', { name: /关闭|取消/ }).last();
-    if (await closeBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await closeBtn.click();
-    }
+    // Close dialog (same TOCTOU-safe pattern as KB-03)
+    await page.getByRole('button', { name: /关闭|取消/ }).last()
+      .click({ timeout: 3_000 }).catch(() => {});
   });
 
   test('点击重命名按钮，输入新名称，列表中显示新名称', async ({ page }) => {
@@ -257,11 +256,9 @@ test.describe('KB-05: 用户隔离验证', () => {
         page.getByText(/上传成功|处理中|已上传/).first(),
       ).toBeVisible({ timeout: 15_000 });
 
-      // Confirm document appears for user_a
-      const closeBtn = page.getByRole('button', { name: /关闭|取消/ }).last();
-      if (await closeBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-        await closeBtn.click();
-      }
+      // Confirm document appears for user_a (same TOCTOU-safe close pattern)
+      await page.getByRole('button', { name: /关闭|取消/ }).last()
+        .click({ timeout: 3_000 }).catch(() => {});
       await expect(
         page.getByRole('cell', { name: new RegExp(docName) }),
       ).toBeVisible({ timeout: 10_000 });
