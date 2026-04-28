@@ -67,6 +67,7 @@ services:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
       POSTGRES_DB: ${POSTGRES_DB:-content_gen_platform}
+      POSTGRES_USER: postgres
       POSTGRES_HOST: db
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       REDIS_URL: redis://redis:6379/0
@@ -83,9 +84,11 @@ services:
     # a Celery task.  Without pre-warming, the download stalls long enough to
     # exhaust the task's soft_time_limit, leaving the document in "processing".
     #
-    # The warm-up script imports SentenceTransformer and calls encode() on a
-    # dummy string; this forces the model weights to be written to the shared
-    # model_cache volume so subsequent worker restarts skip the download.
+    # The warm-up script is run with "|| true" so that a transient network
+    # error (e.g. hf-mirror.com unreachable on first boot) does NOT abort the
+    # entire container startup — the worker still starts and processes tasks.
+    # On a cache miss the first task will trigger the download inline, which is
+    # covered by the 600 s soft_time_limit in process_document_task.
     command: >
       sh -c "python -c \"
       import os, django; os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings.production');
@@ -96,7 +99,7 @@ services:
       m = SentenceTransformer(settings.EMBEDDING_MODEL, device=settings.EMBEDDING_DEVICE);
       m.encode(['warm-up']);
       print('Embedding model ready.')
-      \" &&
+      \" || echo 'Pre-warm skipped (model cache miss or network error) — worker starting anyway' &&
       celery -A config worker -l info -Q default,video,publish -c 2"
 
   celery_beat:

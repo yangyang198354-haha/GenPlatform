@@ -109,7 +109,14 @@ export const contentAPI = {
 export const publisherAPI = {
   // Platform accounts
   listAccounts: () => api.get("/publisher/accounts/"),
-  createAccount: (data) => api.post("/publisher/accounts/", data),
+  // Backend route: POST /publisher/accounts/{platform}/bind/
+  // payload: { display_name, credentials, auth_type? }
+  createAccount: ({ platform_type, account_name, credentials, auth_type = "api_key" }) =>
+    api.post(`/publisher/accounts/${platform_type}/bind/`, {
+      display_name: account_name,
+      credentials,
+      auth_type,
+    }),
   deleteAccount: (id) => api.delete(`/publisher/accounts/${id}/`),
   // Publish tasks
   listTasks: (params) => api.get("/publisher/tasks/", { params }),

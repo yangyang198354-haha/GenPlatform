@@ -13,8 +13,11 @@ test.describe('Content List & Publisher', () => {
 
   test('E2E-005a: Content list page renders', async ({ page }) => {
     await page.goto('/contents');
-    // Use h1 to avoid strict-mode collision with nav sidebar label
-    await expect(page.locator('h1').filter({ hasText: '内容列表' })).toBeVisible();
+    // ContentListView renders <h2>内容列表</h2> (not h1).
+    // The AppLayout topbar renders <h1 class="page-title">内容列表</h1> but the
+    // view-level heading is an h2.  Use h2 here; filter on hasText to avoid
+    // matching other h2 elements that may exist in the layout.
+    await expect(page.locator('h2').filter({ hasText: '内容列表' })).toBeVisible();
   });
 
   test('E2E-005b: Publish page renders platform account section', async ({ page }) => {
