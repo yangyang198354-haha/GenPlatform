@@ -150,20 +150,47 @@ install_dnf() {
     }
     log_info "[OK] 基础包安装完成"
 
-    # Python 3.12（首选）→ 3.11 → 3.9（PyTorch 2.x 最低要求 3.9）
-    # alinux3/RHEL8 默认仓库通常不含 3.12，但含 3.11；EPEL 可提供 3.9
-    if ! command -v python3.12 &>/dev/null; then
-        log_warn "[WARN] python3.12 未找到，尝试安装 python3.12..."
-        $PM install -y python3.12 python3.12-devel 2>/dev/null || true
-    fi
-    if ! command -v python3.12 &>/dev/null && ! command -v python3.11 &>/dev/null; then
-        log_warn "[WARN] 尝试安装 python3.11（alinux3/RHEL8 默认仓库应提供）..."
-        $PM install -y python3.11 python3.11-devel 2>/dev/null || true
-    fi
-    if ! command -v python3.12 &>/dev/null && ! command -v python3.11 &>/dev/null && \
-       ! command -v python3.9 &>/dev/null; then
-        log_warn "[WARN] 尝试安装 python39（EPEL）..."
-        $PM install -y python39 python39-devel 2>/dev/null || true
+    # Python 3.9+（PyTorch 2.x 最低要求）
+    # alinux3/RHEL8: python3.9 通过 AppStream 模块流提供，python3.11+ 可能不直接可用
+    _install_python_rhel() {
+        local PM="$1"
+        # 尝试直接安装各版本
+        for pkg in python3.12 python3.11 python39 python3.9; do
+            $PM install -y "$pkg" "${pkg}-devel" 2>/dev/null && return 0
+        done
+        # 尝试通过 AppStream 模块流启用 Python 3.9
+        if $PM module enable -y python39 2>/dev/null; then
+            $PM install -y python39 python39-devel 2>/dev/null && return 0
+        fi
+        # 最后手段：从 python.org 编译安装 Python 3.11
+        log_warn "[WARN] 包管理器无法提供 Python 3.9+，从源码编译 Python 3.11（约 5-10 分钟）..."
+        $PM install -y openssl-devel bzip2-devel libffi-devel zlib-devel xz-devel \
+            readline-devel sqlite-devel 2>/dev/null || true
+        local PY_VER="3.11.9"
+        local PY_SRC="/tmp/Python-${PY_VER}"
+        curl -fsSL "https://www.python.org/ftp/python/${PY_VER}/Python-${PY_VER}.tar.xz" \
+            -o "/tmp/Python-${PY_VER}.tar.xz" || return 1
+        tar xf "/tmp/Python-${PY_VER}.tar.xz" -C /tmp/
+        cd "$PY_SRC"
+        ./configure --enable-optimizations --prefix=/usr/local --with-ensurepip=install \
+            2>/dev/null
+        make -j"$(nproc)" 2>/dev/null
+        make altinstall 2>/dev/null
+        cd /tmp
+        rm -rf "$PY_SRC" "/tmp/Python-${PY_VER}.tar.xz"
+        command -v python3.11 && return 0
+        return 1
+    }
+    # 仅当没有 3.9+ 时才安装
+    NEED_PY=true
+    for pv in python3.12 python3.11 python3.10 python3.9; do
+        if command -v "$pv" &>/dev/null; then
+            NEED_PY=false
+            break
+        fi
+    done
+    if [[ "$NEED_PY" == "true" ]]; then
+        _install_python_rhel "$PM" || log_warn "[WARN] Python 3.9+ 安装失败，部署将无法继续"
     fi
     # 汇报实际可用版本
     for pv in python3.12 python3.11 python3.10 python3.9; do
