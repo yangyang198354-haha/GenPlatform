@@ -164,60 +164,89 @@ install_dnf() {
         fi
         # 最后手段：从 python.org 编译安装 Python 3.11
         log_warn "[WARN] 包管理器无法提供 Python 3.9+，从源码编译 Python 3.11（约 5-10 分钟）..."
-        # 安装编译依赖（openssl-devel 是 SSL 支持的关键，尝试多个包名）
+        # 安装编译依赖（不静默错误，便于诊断）
+        log_info "安装 Python 编译依赖（zlib-devel/openssl-devel 是必需）..."
+        # OpenSSL（多种包名可能）
+        local OPENSSL_INSTALLED=false
         for ossl_pkg in openssl-devel openssl11-devel; do
-            if $PM install -y "$ossl_pkg" 2>/dev/null; then
+            if $PM install -y "$ossl_pkg"; then
+                OPENSSL_INSTALLED=true
                 log_info "[OK] OpenSSL dev 已安装: $ossl_pkg"
                 break
             fi
         done
-        $PM install -y bzip2-devel libffi-devel zlib-devel xz-devel \
-            readline-devel sqlite-devel 2>/dev/null || true
-        # 验证 OpenSSL 头文件存在（缺失则 Python 将无 SSL 支持）
-        if ! ls /usr/include/openssl/ssl.h /usr/include/openssl11/ssl.h 2>/dev/null | grep -q ssl.h; then
-            log_warn "[WARN] OpenSSL 头文件未找到（/usr/include/openssl/ssl.h），Python 可能无 SSL 支持"
+        # 关键编译依赖（任何一个失败都会导致 Python 模块缺失）
+        # zlib-devel: ensurepip 解压 wheel 必需
+        # libffi-devel: ctypes 模块必需（Django/torch 依赖）
+        $PM install -y zlib-devel bzip2-devel libffi-devel xz-devel \
+            readline-devel sqlite-devel ncurses-devel || {
+            log_error "Python 编译依赖安装失败（zlib-devel/libffi-devel 等）"
+            return 1
+        }
+        # 验证关键头文件
+        if [[ ! -f /usr/include/zlib.h ]]; then
+            log_error "zlib.h 未找到！Python 编译会失败（ensurepip 依赖 zlib 解压 wheel）"
+            log_error "请手动: $PM install -y zlib-devel"
+            return 1
         fi
+        if [[ "$OPENSSL_INSTALLED" != "true" ]] && ! ls /usr/include/openssl/ssl.h 2>/dev/null; then
+            log_error "openssl/ssl.h 未找到！Python 将无 SSL 支持，pip 无法访问 HTTPS PyPI"
+            return 1
+        fi
+        log_info "[OK] zlib.h 和 openssl/ssl.h 头文件已就位"
+        # 清理任何旧的不完整 Python 安装（避免半装的 binary 被误认为成功）
+        rm -f /usr/local/bin/python3.11 /usr/local/bin/pip3.11 \
+              /usr/local/bin/idle3.11 /usr/local/bin/2to3-3.11 \
+              /usr/local/bin/pydoc3.11 /usr/local/bin/python3.11-config 2>/dev/null || true
         local PY_VER="3.11.9"
         local PY_SRC="/tmp/Python-${PY_VER}"
         curl -fsSL "https://www.python.org/ftp/python/${PY_VER}/Python-${PY_VER}.tar.xz" \
             -o "/tmp/Python-${PY_VER}.tar.xz" || return 1
         tar xf "/tmp/Python-${PY_VER}.tar.xz" -C /tmp/
         cd "$PY_SRC"
-        # 不静默 configure（让 SSL 检测问题显示出来）
+        # 不静默 configure/make（让缺模块问题暴露）；altinstall 失败 → set -e 退出
         ./configure --enable-optimizations --prefix=/usr/local --with-ensurepip=install
         make -j"$(nproc)"
         make altinstall
         cd /tmp
         rm -rf "$PY_SRC" "/tmp/Python-${PY_VER}.tar.xz"
-        # 验证 SSL 支持
-        if command -v python3.11 &>/dev/null; then
-            if python3.11 -c "import ssl; print('[OK] SSL:', ssl.OPENSSL_VERSION)" 2>/dev/null; then
-                log_info "[OK] Python 3.11 SSL 支持验证通过"
-            else
-                log_warn "[WARN] Python 3.11 无 SSL 支持，pip install 将无法访问 HTTPS PyPI"
-            fi
-            return 0
+        # 验证关键模块（ssl/zlib/hashlib/ctypes 缺一不可）
+        if ! command -v python3.11 &>/dev/null; then
+            log_error "python3.11 编译失败，未生成 binary"
+            return 1
         fi
-        return 1
+        if ! python3.11 -c "import ssl, zlib, hashlib, ctypes; print('[OK] SSL:', ssl.OPENSSL_VERSION)"; then
+            log_error "Python 3.11 关键模块缺失（ssl/zlib/hashlib/ctypes 之一）"
+            return 1
+        fi
+        log_info "[OK] Python 3.11 编译成功，所有关键模块就绪"
+        return 0
     }
-    # 检测已有 Python 是否有 SSL 支持；无 SSL 则删除并重新编译
+    # 检测已有 Python 是否完整（同时校验 ssl + zlib，缺一即重编译）
     NEED_PY=true
     for pv in python3.12 python3.11 python3.10 python3.9; do
         if command -v "$pv" &>/dev/null; then
-            if "$pv" -c "import ssl" 2>/dev/null; then
+            if "$pv" -c "import ssl, zlib" 2>/dev/null; then
                 NEED_PY=false
                 break
             else
-                log_warn "[WARN] $pv 无 SSL 支持（源码编译时缺少 openssl-devel），将删除并重新编译..."
+                log_warn "[WARN] $pv 缺少 ssl 或 zlib 模块（编译依赖未装全），将清理并重新编译..."
                 PY_MINOR="${pv##python}"
                 rm -f "/usr/local/bin/${pv}" "/usr/local/bin/pip${PY_MINOR}" \
+                       "/usr/local/bin/idle${PY_MINOR}" "/usr/local/bin/2to3-${PY_MINOR}" \
+                       "/usr/local/bin/pydoc${PY_MINOR}" "/usr/local/bin/${pv}-config" \
                        "/usr/local/bin/python3" "/usr/local/bin/pip3" 2>/dev/null || true
                 break
             fi
         fi
     done
     if [[ "$NEED_PY" == "true" ]]; then
-        _install_python_rhel "$PM" || log_warn "[WARN] Python 3.9+ 安装失败，部署将无法继续"
+        # 不能用 || log_warn —— 那会让 set -e 失效，错误被吞
+        if ! _install_python_rhel "$PM"; then
+            log_error "Python 3.9+ 安装失败，部署无法继续"
+            log_error "请检查上方日志中的依赖安装错误（zlib-devel / openssl-devel）"
+            exit 1
+        fi
     fi
     # 汇报实际可用版本
     for pv in python3.12 python3.11 python3.10 python3.9; do
@@ -227,15 +256,31 @@ install_dnf() {
         fi
     done
 
-    # PostgreSQL 15 + pgvector（PGDG rpm 官方源）
+    # PostgreSQL 15 + pgvector（PGDG rpm 官方源；中国服务器降级到 Aliyun 镜像）
     log_info "--- 安装 PostgreSQL 15 + pgvector（PGDG 源）---"
     # RHEL 8 / alinux3 / CentOS Stream 8 均兼容 EL-8 包
-    local PGDG_RPM="https://download.postgresql.org/pub/repos/yum/reporpms/EL-8-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
-    $PM install -y "$PGDG_RPM" 2>/dev/null || true
+    # 中国境内 download.postgresql.org 不稳定，先尝试官方，失败后用 Aliyun 镜像
+    local PGDG_OFFICIAL="https://download.postgresql.org/pub/repos/yum/reporpms/EL-8-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
+    local PGDG_ALIYUN="https://mirrors.aliyun.com/postgresql/repos/yum/reporpms/EL-8-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
+    if ! $PM install -y "$PGDG_OFFICIAL" 2>/dev/null; then
+        log_warn "[WARN] 官方 PGDG 仓库不可达，使用 Aliyun 镜像..."
+        $PM install -y "$PGDG_ALIYUN" || {
+            log_error "PGDG 仓库安装失败（官方+Aliyun 都失败），无法安装 PostgreSQL 15"
+            return 1
+        }
+        # 把 baseurl 改为 Aliyun 镜像（仓库 metadata 仍指向官方）
+        if [[ -d /etc/yum.repos.d ]]; then
+            sed -i 's|https://download.postgresql.org/pub/repos/yum|https://mirrors.aliyun.com/postgresql/repos/yum|g' \
+                /etc/yum.repos.d/pgdg-redhat-all.repo 2>/dev/null || true
+        fi
+    fi
     # 禁用系统内置的 postgresql 模块，避免版本冲突
     $PM -qy module disable postgresql 2>/dev/null || true
-    $PM install -y postgresql15-server postgresql15-contrib 2>/dev/null || \
-        log_warn "[WARN] PostgreSQL 15 安装失败，请手动安装: https://www.postgresql.org/download/linux/redhat/"
+    if ! $PM install -y postgresql15-server postgresql15-contrib; then
+        log_error "PostgreSQL 15 安装失败，部署无法继续（deploy_physical.sh step 7 需要 DB 连接）"
+        return 1
+    fi
+    log_info "[OK] PostgreSQL 15 安装完成"
     if command -v pg_config &>/dev/null || [ -f /usr/pgsql-15/bin/pg_config ]; then
         # pgvector（依赖 postgresql15-devel）
         $PM install -y postgresql15-devel 2>/dev/null || true
