@@ -24,10 +24,31 @@ log_info "分支:     $BRANCH"
 
 # ── 步骤 1: 配置校验 ──────────────────────────────────────────────────────────
 log_info "--- 步骤 1/12: 校验 .env 配置 ---"
-bash "$SCRIPT_DIR/validate_config.sh" "$PROJECT_ROOT/.env"
+# .env 由 GitHub Actions workflow 生成在 $APP_DIR/app/.env（即 $PROJECT_ROOT/.env）
+# systemd 服务的 EnvironmentFile 指向 $APP_DIR/.env，需要创建软链接保持一致
+ENV_APP="$PROJECT_ROOT/.env"
+ENV_SYSTEMD="$APP_DIR/.env"
+if [[ ! -f "$ENV_APP" ]]; then
+    # 如果 app 目录下没有 .env，检查 systemd 路径是否有（首次手动部署场景）
+    if [[ -f "$ENV_SYSTEMD" ]] && [[ "$ENV_APP" != "$ENV_SYSTEMD" ]]; then
+        log_warn "[WARN] $ENV_APP 不存在，使用 $ENV_SYSTEMD"
+        cp "$ENV_SYSTEMD" "$ENV_APP"
+    fi
+fi
+bash "$SCRIPT_DIR/validate_config.sh" "$ENV_APP"
+
+# 确保 systemd EnvironmentFile 路径（$APP_DIR/.env）可被各服务读取
+# systemd 服务以 genplatform 用户运行；.env 所有者由 setup_system.sh 的
+# chown -R genplatform:genplatform 保证，chmod 600 对所有者可读写即可
+if [[ "$ENV_APP" != "$ENV_SYSTEMD" ]]; then
+    # 创建软链接：/opt/genplatform/.env -> /opt/genplatform/app/.env
+    ln -sf "$ENV_APP" "$ENV_SYSTEMD" 2>/dev/null || \
+        cp "$ENV_APP" "$ENV_SYSTEMD"
+    log_info "[OK] $ENV_SYSTEMD -> $ENV_APP (systemd EnvironmentFile 已就位)"
+fi
 
 # 加载环境变量
-load_env "$PROJECT_ROOT/.env"
+load_env "$ENV_APP"
 
 # ── 步骤 2: 记录当前 commit ───────────────────────────────────────────────────
 log_info "--- 步骤 2/12: 记录部署时间和 commit ---"
@@ -149,7 +170,8 @@ fi
 
 # ── 步骤 5: 安装 Python 依赖 ──────────────────────────────────────────────────
 log_info "--- 步骤 5/12: 安装 Python 依赖 ---"
-# 先安装 PyTorch CPU-only（避免拉取 CUDA 版本，节约磁盘）
+# 先安装 PyTorch CPU-only（避免拉取 CUDA 版本，节约磁盘和内存）
+# 注意：requirements.txt 中的 torch==2.3.1 需要被跳过，避免覆盖 cpu-only 版本
 log_info "安装 PyTorch CPU-only..."
 "$VENV_DIR/bin/pip" install \
     "torch==2.3.1+cpu" \
@@ -157,10 +179,15 @@ log_info "安装 PyTorch CPU-only..."
     --quiet
 log_info "[OK] PyTorch CPU-only 安装完成"
 
-log_info "安装其余 Python 依赖..."
+log_info "安装其余 Python 依赖（跳过 torch，避免覆盖 CPU-only 版本）..."
+# 写 constraint 文件固定 torch 版本（防止 requirements.txt 中的 torch 行触发重新安装 CUDA 版）
+echo "torch==2.3.1+cpu" > /tmp/torch_constraint.txt
 "$VENV_DIR/bin/pip" install \
     -r "$BACKEND_DIR/requirements.txt" \
+    --constraint /tmp/torch_constraint.txt \
+    --extra-index-url https://download.pytorch.org/whl/cpu \
     --quiet
+rm -f /tmp/torch_constraint.txt
 log_info "[OK] Python 依赖安装完成"
 
 # ── 步骤 6: 前端构建 ──────────────────────────────────────────────────────────
@@ -179,30 +206,31 @@ else
     log_warn "[WARN] frontend/package.json 不存在，跳过前端构建"
 fi
 
-# ── 步骤 7: Django 准备 ───────────────────────────────────────────────────────
-log_info "--- 步骤 7/12: 执行数据库迁移 ---"
-(
-    cd "$BACKEND_DIR"
-    "$VENV_DIR/bin/python" manage.py migrate --noinput
-)
-log_info "[OK] 数据库迁移完成"
-
-log_info "--- 步骤 7b/12: 收集静态文件 ---"
-(
-    cd "$BACKEND_DIR"
-    STATIC_ROOT="$STATIC_DIR/static" \
-    "$VENV_DIR/bin/python" manage.py collectstatic --noinput --clear
-)
-log_info "[OK] collectstatic 完成"
-
-# ── 步骤 8: PostgreSQL 初始化 ─────────────────────────────────────────────────
-log_info "--- 步骤 8/12: 初始化 PostgreSQL 数据库和 pgvector 扩展 ---"
+# ── 步骤 7: PostgreSQL 初始化 ─────────────────────────────────────────────────
+# 必须在 migrate 之前执行：确保 PostgreSQL 服务运行，且目标数据库已创建
+log_info "--- 步骤 7/12: 初始化 PostgreSQL 数据库和 pgvector 扩展 ---"
 DB_USER="${POSTGRES_USER:-postgres}"
 DB_NAME="${POSTGRES_DB:-content_gen_platform}"
 DB_PASS="${POSTGRES_PASSWORD:-}"
 
+# 确保 PostgreSQL 服务正在运行（alinux3 上服务名为 postgresql-15）
+if ! systemctl is-active --quiet postgresql-15 2>/dev/null && \
+   ! systemctl is-active --quiet postgresql 2>/dev/null; then
+    log_warn "[WARN] PostgreSQL 未运行，尝试启动..."
+    systemctl start postgresql-15 2>/dev/null || systemctl start postgresql 2>/dev/null || {
+        log_error "PostgreSQL 启动失败，请检查安装"
+        exit 1
+    }
+    sleep 3
+fi
+
+# 确保 psql 命令可用（PGDG 安装路径可能不在 PATH）
+if ! command -v psql &>/dev/null; then
+    export PATH="/usr/pgsql-15/bin:$PATH"
+fi
+
 # 创建数据库用户（若不存在）
-if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'" | grep -q 1 2>/dev/null; then
+if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'" 2>/dev/null | grep -q 1; then
     sudo -u postgres psql -c "CREATE USER $DB_USER WITH PASSWORD '$DB_PASS';"
     log_info "[OK] 数据库用户 $DB_USER 已创建"
 else
@@ -210,7 +238,7 @@ else
 fi
 
 # 创建数据库（若不存在）
-if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1 2>/dev/null; then
+if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>/dev/null | grep -q 1; then
     sudo -u postgres psql -c "CREATE DATABASE $DB_NAME OWNER $DB_USER;"
     log_info "[OK] 数据库 $DB_NAME 已创建"
 else
@@ -218,8 +246,26 @@ else
 fi
 
 # 启用 pgvector 扩展
-sudo -u postgres psql -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>/dev/null
-log_info "[OK] pgvector 扩展已启用"
+sudo -u postgres psql -d "$DB_NAME" -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>/dev/null || \
+    log_warn "[WARN] pgvector 扩展启用失败（可能未安装），向量检索功能将不可用"
+log_info "[OK] PostgreSQL 初始化完成"
+
+# ── 步骤 8: Django 准备（migrate + collectstatic）────────────────────────────
+# 必须在 PostgreSQL 初始化之后执行
+log_info "--- 步骤 8/12: 执行数据库迁移 ---"
+(
+    cd "$BACKEND_DIR"
+    "$VENV_DIR/bin/python" manage.py migrate --noinput
+)
+log_info "[OK] 数据库迁移完成"
+
+log_info "--- 步骤 8b/12: 收集静态文件 ---"
+(
+    cd "$BACKEND_DIR"
+    STATIC_ROOT="$STATIC_DIR/static" \
+    "$VENV_DIR/bin/python" manage.py collectstatic --noinput --clear
+)
+log_info "[OK] collectstatic 完成"
 
 # ── 步骤 9: 嵌入模型预热 ──────────────────────────────────────────────────────
 log_info "--- 步骤 9/12: 预热嵌入模型（可失败，Worker 启动时会重试）---"
@@ -243,15 +289,39 @@ chown -R genplatform:genplatform "$APP_DIR" 2>/dev/null || true
 
 # ── 步骤 10: 启动服务 ─────────────────────────────────────────────────────────
 log_info "--- 步骤 10/12: 启动 GenPlatform 服务 ---"
-systemctl start genplatform-backend
-systemctl start genplatform-celery
-systemctl start genplatform-celery-beat
+
+# 确保基础设施服务（Redis / PostgreSQL）正在运行
+log_info "确保 Redis 运行中..."
+systemctl start redis 2>/dev/null || systemctl start redis-server 2>/dev/null || \
+    log_warn "[WARN] Redis 启动失败，Celery 将无法连接"
+
+log_info "确保 PostgreSQL 运行中..."
+systemctl start postgresql-15 2>/dev/null || systemctl start postgresql 2>/dev/null || \
+    log_warn "[WARN] PostgreSQL 启动失败"
+
+# 使用 restart（幂等：不论服务是否已运行均重启）
+# 热更新场景（run_setup=false）也需要 restart 来加载新代码
+systemctl restart genplatform-backend
+log_info "[OK] genplatform-backend 已启动"
+
+systemctl restart genplatform-celery
+log_info "[OK] genplatform-celery 已启动"
+
+systemctl restart genplatform-celery-beat
+log_info "[OK] genplatform-celery-beat 已启动"
+
 log_info "[OK] 所有服务已启动"
 
 # ── 步骤 11: 重启 Nginx ───────────────────────────────────────────────────────
-log_info "--- 步骤 11/12: 重载 Nginx ---"
-systemctl reload nginx
-log_info "[OK] Nginx 已重载"
+log_info "--- 步骤 11/12: 重载/启动 Nginx ---"
+# 首次部署：Nginx 可能还未运行，用 start；已运行时用 reload（零停机）
+if systemctl is-active --quiet nginx 2>/dev/null; then
+    nginx -t && systemctl reload nginx
+    log_info "[OK] Nginx 已重载（零停机）"
+else
+    nginx -t && systemctl start nginx
+    log_info "[OK] Nginx 已启动"
+fi
 
 # ── 步骤 12: 冒烟测试 ────────────────────────────────────────────────────────
 log_info "--- 步骤 12/12: 执行冒烟测试 ---"

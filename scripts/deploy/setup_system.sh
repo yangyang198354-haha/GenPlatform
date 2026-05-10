@@ -247,6 +247,14 @@ install_dnf() {
         fi
     fi
 
+    # 启动 PostgreSQL 15（initdb 后必须先启动才能接受连接）
+    if command -v pg_config &>/dev/null || [ -f /usr/pgsql-15/bin/pg_config ]; then
+        systemctl enable postgresql-15 2>/dev/null || true
+        systemctl start postgresql-15 2>/dev/null || \
+            log_warn "[WARN] PostgreSQL 15 启动失败，deploy_physical.sh 将尝试重新启动"
+        log_info "[OK] PostgreSQL 15 已启动"
+    fi
+
     # ffmpeg / tesseract / poppler（EPEL 提供，可能不完整）
     $PM install -y ffmpeg tesseract poppler-utils 2>/dev/null || \
         log_warn "[WARN] ffmpeg/tesseract/poppler 安装失败，如需 OCR/视频功能请手动安装"
@@ -263,6 +271,15 @@ install_dnf() {
     else
         log_info "[SKIP] Node.js 已满足版本要求: $(node --version)"
     fi
+
+    # 启动 Redis（deploy_physical.sh 步骤 10 需要 Redis 运行）
+    systemctl enable redis 2>/dev/null || systemctl enable redis-server 2>/dev/null || true
+    systemctl start redis 2>/dev/null || systemctl start redis-server 2>/dev/null || \
+        log_warn "[WARN] Redis 启动失败，请手动检查"
+
+    # 启动 Nginx（配置文件安装后需要先验证再启动）
+    systemctl enable nginx 2>/dev/null || true
+    # Nginx 实际启动延迟到配置安装后（见下方步骤 8）
 
     log_info "[OK] $PM 安装阶段完成"
     log_warn "PostgreSQL 15 需单独通过 PGDG rpm 安装: https://www.postgresql.org/download/linux/redhat/"
@@ -358,8 +375,12 @@ if [[ -f "$NGINX_SRC" ]]; then
 
     if nginx -t 2>/dev/null; then
         log_info "[OK] Nginx 配置语法检查通过（${NGINX_CONF_DEST}）"
+        # 启动/重载 Nginx（配置验证通过后才启动，避免配置错误导致 Nginx 拒绝启动）
+        systemctl start nginx 2>/dev/null || systemctl reload nginx 2>/dev/null || \
+            log_warn "[WARN] Nginx 启动失败，请检查 systemd 日志"
     else
-        log_warn "[WARN] Nginx 配置语法检查失败（可能 upstream 服务未启动），继续部署"
+        log_warn "[WARN] Nginx 配置语法检查失败（可能 upstream 服务未启动），跳过 Nginx 启动"
+        log_warn "       部署完成后手动执行: nginx -t && systemctl start nginx"
     fi
 else
     log_warn "[WARN] Nginx 配置文件不存在: $NGINX_SRC（跳过 Nginx 配置）"
