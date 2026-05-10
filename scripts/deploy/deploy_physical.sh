@@ -81,11 +81,21 @@ else
     log_warn "       如依赖 Python 3.12 特性，请升级服务器 Python 版本"
 fi
 
+# 如果 venv 存在但 Python 版本不匹配，自动重建（避免用旧版 pip 安装新版包）
+if [[ -f "$VENV_DIR/bin/python" ]]; then
+    EXISTING_VER="$("$VENV_DIR/bin/python" --version 2>&1 | awk '{print $2}')"
+    EXPECTED_VER="$("$PYTHON_BIN" --version 2>&1 | awk '{print $2}')"
+    if [[ "$EXISTING_VER" != "$EXPECTED_VER" ]]; then
+        log_warn "[WARN] venv Python 版本不匹配（现有: $EXISTING_VER，期望: $EXPECTED_VER），重建 venv..."
+        rm -rf "$VENV_DIR"
+    fi
+fi
+
 if [[ ! -f "$VENV_DIR/bin/python" ]]; then
     "$PYTHON_BIN" -m venv "$VENV_DIR"
     log_info "[OK] venv 创建完成: $VENV_DIR (${PYTHON_VERSION})"
 else
-    log_info "[SKIP] venv 已存在，跳过创建"
+    log_info "[SKIP] venv 已存在（Python ${EXISTING_VER:-unknown}），跳过创建"
 fi
 "$VENV_DIR/bin/pip" install --upgrade pip --quiet
 
