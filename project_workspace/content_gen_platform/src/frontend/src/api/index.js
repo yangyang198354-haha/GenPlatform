@@ -53,15 +53,26 @@ api.interceptors.response.use(
     const originalRequest = error.config;
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
+      const auth = useAuthStore();
+
+      // If there is no refresh token (user is not logged in), skip the refresh
+      // attempt entirely.  Calling the refresh endpoint with a null token
+      // causes simplejwt to return 400, which surfaces as a noisy uncaught
+      // rejection in the console.  Instead, go straight to logout + redirect.
+      if (!auth.refreshTokenVal) {
+        auth.logout();
+        router.push("/login");
+        return Promise.reject(new Error("Login required"));
+      }
+
       try {
-        const auth = useAuthStore();
         await ensureTokenRefreshed(auth);
         originalRequest.headers.Authorization = `Bearer ${auth.accessToken}`;
         return api(originalRequest);
       } catch {
-        const auth = useAuthStore();
         auth.logout();
         router.push("/login");
+        return Promise.reject(new Error("Session expired, please log in again"));
       }
     }
     return Promise.reject(error);

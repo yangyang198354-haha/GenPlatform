@@ -273,6 +273,17 @@ async function fetchDocuments() {
     const { data } = await kbAPI.list();
     documents.value = data.results ?? data;
     _schedulePollingForProcessing();
+  } catch (err) {
+    // 401 (unauthenticated) is handled by the axios interceptor which
+    // redirects to /login.  Swallow the error here to avoid an uncaught
+    // Promise rejection bubbling up and confusing the console.
+    // Any other error (500, network) is also swallowed silently because
+    // the page will simply show an empty table — not ideal but harmless.
+    const status = err.response?.status;
+    if (status !== 401) {
+      // Re-expose unexpected errors to the console for debugging.
+      console.error("[KnowledgeBaseView] fetchDocuments error:", err);
+    }
   } finally {
     loading.value = false;
   }

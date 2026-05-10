@@ -1,0 +1,137 @@
+name: Diagnose Production Issues
+
+# 一次性诊断 workflow：SSH 到生产机收集日志，输出到 Actions log 供分析。
+# 用法: gh workflow run diagnose-prod.yml
+# 完成后: gh run view --log | grep -A50 "=== DIAG"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    name: Collect Production Diagnostics
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Collect diagnostics from production server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          password: ${{ secrets.PROD_PASSWORD }}
+          command_timeout: 10m
+          script: |
+            echo "=== DIAG START ==="
+
+            # ── 1. 服务状态 ───────────────────────────────────────────────────
+            echo ""
+            echo "=== DIAG 1: systemctl status genplatform-backend ==="
+            systemctl status genplatform-backend --no-pager --lines=50 2>&1 || true
+
+            echo ""
+            echo "=== DIAG 2: systemctl status genplatform-celery ==="
+            systemctl status genplatform-celery --no-pager --lines=20 2>&1 || true
+
+            echo ""
+            echo "=== DIAG 3: systemctl status nginx ==="
+            systemctl status nginx --no-pager --lines=10 2>&1 || true
+
+            # ── 2. Gunicorn 错误日志（最近 200 行）────────────────────────────
+            echo ""
+            echo "=== DIAG 4: gunicorn-error.log (last 200 lines) ==="
+            tail -200 /opt/genplatform/logs/gunicorn-error.log 2>/dev/null || echo "[NOT FOUND] /opt/genplatform/logs/gunicorn-error.log"
+
+            echo ""
+            echo "=== DIAG 5: gunicorn.log (last 50 lines) ==="
+            tail -50 /opt/genplatform/logs/gunicorn.log 2>/dev/null || echo "[NOT FOUND] /opt/genplatform/logs/gunicorn.log"
+
+            # ── 3. Nginx 错误日志 ─────────────────────────────────────────────
+            echo ""
+            echo "=== DIAG 6: nginx error.log - upstream/502 related ==="
+            grep -i 'upstream\|502\|timeout\|connect\|register' \
+              /opt/genplatform/logs/nginx-error.log 2>/dev/null | tail -50 \
+              || grep -i 'upstream\|502\|timeout\|connect\|register' \
+                 /var/log/nginx/error.log 2>/dev/null | tail -50 \
+              || echo "[NOT FOUND] nginx error.log"
+
+            echo ""
+            echo "=== DIAG 7: nginx error.log full last 100 ==="
+            tail -100 /opt/genplatform/logs/nginx-error.log 2>/dev/null \
+              || tail -100 /var/log/nginx/error.log 2>/dev/null \
+              || echo "[NOT FOUND]"
+
+            # ── 4. journalctl (backend service) ──────────────────────────────
+            echo ""
+            echo "=== DIAG 8: journalctl genplatform-backend last 100 lines ==="
+            journalctl -u genplatform-backend --no-pager --lines=100 2>&1 | tail -100 || true
+
+            # ── 5. 端口和网络 ─────────────────────────────────────────────────
+            echo ""
+            echo "=== DIAG 9: port 8000 listening? ==="
+            ss -tlnp | grep 8000 || echo "[NONE] port 8000 not listening"
+
+            echo ""
+            echo "=== DIAG 10: curl localhost:8000/api/v1/auth/register/ ==="
+            curl -s -o /dev/null -w "HTTP %{http_code}\n" \
+              -X POST -H "Content-Type: application/json" \
+              -d '{"username":"diag","email":"diag@test.com","password":"Test1234!","password2":"Test1234!"}' \
+              http://localhost:8000/api/v1/auth/register/ 2>&1 || echo "[CURL FAILED]"
+
+            echo ""
+            echo "=== DIAG 11: curl localhost (via nginx) /api/v1/auth/register/ ==="
+            curl -s -o /dev/null -w "HTTP %{http_code}\n" \
+              -X POST -H "Content-Type: application/json" \
+              -d '{"username":"diag","email":"diag@test.com","password":"Test1234!","password2":"Test1234!"}' \
+              http://localhost/api/v1/auth/register/ 2>&1 || echo "[CURL FAILED]"
+
+            # ── 6. 内存/OOM ───────────────────────────────────────────────────
+            echo ""
+            echo "=== DIAG 12: free -h ==="
+            free -h 2>&1 || true
+
+            echo ""
+            echo "=== DIAG 13: OOM killer history ==="
+            dmesg 2>/dev/null | grep -i "killed process\|oom" | tail -20 || \
+              journalctl -k --no-pager | grep -i "killed process\|oom" | tail -20 || \
+              echo "[NO OOM EVENTS FOUND]"
+
+            # ── 7. Django DB 迁移状态 ─────────────────────────────────────────
+            echo ""
+            echo "=== DIAG 14: Django migrate --check ==="
+            BACKEND_DIR=/opt/genplatform/app/project_workspace/content_gen_platform/src/backend
+            VENV_PY=/opt/genplatform/venv/bin/python
+            if [ -x "$VENV_PY" ] && [ -d "$BACKEND_DIR" ]; then
+              (cd "$BACKEND_DIR" && "$VENV_PY" manage.py migrate --check 2>&1) || \
+              echo "[migrate --check returned non-zero — unapplied migrations exist]"
+            else
+              echo "[SKIP] venv or backend dir not found"
+            fi
+
+            echo ""
+            echo "=== DIAG 15: Django showmigrations token_blacklist ==="
+            if [ -x "$VENV_PY" ] && [ -d "$BACKEND_DIR" ]; then
+              (cd "$BACKEND_DIR" && "$VENV_PY" manage.py showmigrations 2>&1 | grep -E 'token_blacklist|accounts') || \
+              echo "[showmigrations grep found nothing or failed]"
+            else
+              echo "[SKIP]"
+            fi
+
+            echo ""
+            echo "=== DIAG 16: Python startup check (import Django apps) ==="
+            if [ -x "$VENV_PY" ] && [ -d "$BACKEND_DIR" ]; then
+              (cd "$BACKEND_DIR" && "$VENV_PY" -c "
+            import django, os
+            os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.production')
+            django.setup()
+            print('Django setup: OK')
+            from django.db import connection
+            connection.ensure_connection()
+            print('DB connection: OK')
+            " 2>&1)
+            else
+              echo "[SKIP]"
+            fi
+
+            echo ""
+            echo "=== DIAG END ==="
