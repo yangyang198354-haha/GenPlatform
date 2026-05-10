@@ -294,12 +294,19 @@ if ! command -v psql &>/dev/null; then
     export PATH="/usr/pgsql-15/bin:$PATH"
 fi
 
-# 创建数据库用户（若不存在）
+# 创建/同步数据库用户密码（确保密码与 .env 一致）
+# postgres 用户系统默认存在，CREATE USER 会被跳过；必须用 ALTER USER 同步密码
+if [[ -z "$DB_PASS" ]]; then
+    log_error "POSTGRES_PASSWORD 为空，无法配置数据库用户密码"
+    exit 1
+fi
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'" 2>/dev/null | grep -q 1; then
-    sudo -u postgres psql -c "CREATE USER $DB_USER WITH PASSWORD '$DB_PASS';"
+    sudo -u postgres psql -c "CREATE USER $DB_USER WITH PASSWORD '$DB_PASS' CREATEDB;"
     log_info "[OK] 数据库用户 $DB_USER 已创建"
 else
-    log_info "[SKIP] 数据库用户 $DB_USER 已存在"
+    # 始终同步密码（首次部署 postgres 已存在，密码未设；后续部署支持密码轮转）
+    sudo -u postgres psql -c "ALTER USER $DB_USER WITH PASSWORD '$DB_PASS';" >/dev/null
+    log_info "[OK] 数据库用户 $DB_USER 密码已同步至 .env 配置"
 fi
 
 # 创建数据库（若不存在）
