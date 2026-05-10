@@ -113,25 +113,49 @@ if [[ -f "$VENV_DIR/bin/python" ]]; then
 fi
 
 if [[ ! -f "$VENV_DIR/bin/python" ]]; then
-    log_info "创建 venv: $VENV_DIR..."
-    # 尝试三种方式（不静默错误便于诊断）
+    log_info "创建 venv: $VENV_DIR (使用 $PYTHON_BIN)..."
+    # 诊断信息：解析真实 python 路径（alinux3 上可能是 wrapper）
+    REAL_PYTHON="$(realpath "$(command -v "$PYTHON_BIN")" 2>/dev/null || echo "$PYTHON_BIN")"
+    log_info "  $PYTHON_BIN 真实路径: $REAL_PYTHON"
+
+    _try_venv() {
+        local mode="$1"; shift
+        rm -rf "$VENV_DIR"
+        if "$@" 2>&1 && [[ -f "$VENV_DIR/bin/python" ]]; then
+            log_info "[OK] venv 创建完成（$mode）"
+            return 0
+        fi
+        return 1
+    }
+
     VENV_OK=false
-    if "$PYTHON_BIN" -m venv "$VENV_DIR" 2>&1; then
-        VENV_OK=true
-        log_info "[OK] venv 创建完成（含 pip）"
-    elif "$PYTHON_BIN" -m venv --without-pip "$VENV_DIR" 2>&1; then
-        VENV_OK=true
-        log_warn "[WARN] venv 创建完成（无 pip，将后续手动安装）"
-    elif "$PYTHON_BIN" -m venv --without-pip --copies "$VENV_DIR" 2>&1; then
-        VENV_OK=true
-        log_warn "[WARN] venv 创建完成（无 pip，硬拷贝模式）"
+    # 策略1: 标准 venv
+    if ! $VENV_OK && _try_venv "标准模式" "$PYTHON_BIN" -m venv "$VENV_DIR"; then VENV_OK=true; fi
+    # 策略2: --without-pip（跳过 ensurepip bootstrap，可能源头是 pip 装失败）
+    if ! $VENV_OK && _try_venv "无pip模式" "$PYTHON_BIN" -m venv --without-pip "$VENV_DIR"; then VENV_OK=true; fi
+    # 策略3: --without-pip --copies（避开 symlink，对 wrapper 更兼容）
+    if ! $VENV_OK && _try_venv "硬拷贝模式" "$PYTHON_BIN" -m venv --without-pip --copies "$VENV_DIR"; then VENV_OK=true; fi
+    # 策略4: 用 realpath 解析后的真实 python（绕开 wrapper 脚本）
+    if ! $VENV_OK && [[ "$REAL_PYTHON" != "$PYTHON_BIN" ]] && [[ -x "$REAL_PYTHON" ]]; then
+        if _try_venv "real-python" "$REAL_PYTHON" -m venv --without-pip --copies "$VENV_DIR"; then VENV_OK=true; fi
     fi
-    # 验证 binary 是否真的生成（venv 命令返回 0 但未创建 binary 的情况）
-    if [[ "$VENV_OK" != "true" ]] || [[ ! -f "$VENV_DIR/bin/python" ]]; then
-        log_error "venv 创建失败：$PYTHON_BIN -m venv 无法生成 $VENV_DIR/bin/python"
-        log_error "请确认已安装 python3.x-pip / python3.x-setuptools 子包"
-        log_error "alinux3 命令: dnf install -y python3.11-pip python3.11-setuptools"
-        ls -la "$VENV_DIR/bin/" 2>&1 || true
+    # 策略5: virtualenv.pyz（独立 zipapp，比 venv 更鲁棒）
+    if ! $VENV_OK; then
+        log_warn "venv 模块全部失败，尝试 virtualenv.pyz..."
+        if curl -fsSL https://bootstrap.pypa.io/virtualenv.pyz -o /tmp/virtualenv.pyz 2>/dev/null; then
+            rm -rf "$VENV_DIR"
+            if "$PYTHON_BIN" /tmp/virtualenv.pyz "$VENV_DIR" 2>&1 && [[ -f "$VENV_DIR/bin/python" ]]; then
+                log_info "[OK] venv 创建完成（virtualenv.pyz）"
+                VENV_OK=true
+            fi
+            rm -f /tmp/virtualenv.pyz
+        fi
+    fi
+
+    if ! $VENV_OK; then
+        log_error "venv 创建失败：所有策略均无法生成 $VENV_DIR/bin/python"
+        log_error "请检查 $PYTHON_BIN 安装完整性: $PYTHON_BIN --version, ls $REAL_PYTHON"
+        ls -la "$VENV_DIR/bin/" 2>&1 || log_error "venv 目录不存在或为空"
         exit 1
     fi
     log_info "[OK] venv binary 已就位: $VENV_DIR/bin/python (${PYTHON_VERSION})"
