@@ -1,0 +1,46 @@
+[Unit]
+Description=GenPlatform Celery Worker
+Documentation=https://github.com/yangyang198354-haha/GenPlatform
+After=network.target postgresql.service redis.service genplatform-backend.service
+
+[Service]
+Type=forking
+User=genplatform
+Group=genplatform
+WorkingDirectory=/opt/genplatform/app/project_workspace/content_gen_platform/src/backend
+EnvironmentFile=/opt/genplatform/.env
+
+# HF 镜像加速（GFW 内服务器，首次启动时下载嵌入模型）
+Environment=HF_ENDPOINT=https://hf-mirror.com
+Environment=HF_HUB_DISABLE_PROGRESS_BARS=1
+
+ExecStart=/opt/genplatform/venv/bin/celery \
+    -A config worker \
+    -l info \
+    -Q default,video,publish \
+    -c 2 \
+    --logfile /opt/genplatform/logs/celery-worker.log \
+    --pidfile /run/genplatform/celery-worker.pid \
+    --detach
+
+# warm shutdown: 发送 shutdown 命令，等待当前任务完成后退出
+ExecStop=/bin/sh -c '/opt/genplatform/venv/bin/celery -A config control shutdown 2>/dev/null; sleep 3'
+
+ExecReload=/bin/kill -s HUP $MAINPID
+
+Restart=always
+RestartSec=10
+
+# TimeoutStartSec=300: 嵌入模型首次下载最多 5 分钟
+# 避免 systemd 因启动超时 kill Worker（对应 REQ-DEPLOY-FUNC-010）
+TimeoutStartSec=300
+TimeoutStopSec=60
+
+# PID 文件路径（forking 模式必须）
+PIDFile=/run/genplatform/celery-worker.pid
+
+RuntimeDirectory=genplatform
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

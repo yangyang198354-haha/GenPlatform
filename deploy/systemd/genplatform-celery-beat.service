@@ -1,0 +1,33 @@
+[Unit]
+Description=GenPlatform Celery Beat Scheduler
+Documentation=https://github.com/yangyang198354-haha/GenPlatform
+After=network.target postgresql.service redis.service genplatform-backend.service
+
+[Service]
+Type=simple
+User=genplatform
+Group=genplatform
+WorkingDirectory=/opt/genplatform/app/project_workspace/content_gen_platform/src/backend
+EnvironmentFile=/opt/genplatform/.env
+
+ExecStart=/opt/genplatform/venv/bin/celery \
+    -A config beat \
+    -l info \
+    --scheduler django_celery_beat.schedulers:DatabaseScheduler \
+    --logfile /opt/genplatform/logs/celery-beat.log \
+    --pidfile /run/genplatform/celery-beat.pid
+
+Restart=always
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+RuntimeDirectory=genplatform
+RuntimeDirectoryMode=0755
+
+# 安全加固
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
