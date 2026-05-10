@@ -362,6 +362,27 @@ chown -R genplatform:genplatform "$APP_DIR" 2>/dev/null || true
 # ── 步骤 10: 启动服务 ─────────────────────────────────────────────────────────
 log_info "--- 步骤 10/12: 启动 GenPlatform 服务 ---"
 
+# 同步 systemd 服务文件（run_setup=false 时 setup_system.sh 不会跑，
+# 服务定义变更必须在此处生效，否则 systemctl 拿到的是旧版 Requires=postgresql.service）
+SYSTEMD_SRC="$APP_CODE_DIR/deploy/systemd"
+SYSTEMD_DEST="/etc/systemd/system"
+if [[ -d "$SYSTEMD_SRC" ]]; then
+    daemon_reload=0
+    for svc_file in "$SYSTEMD_SRC"/*.service; do
+        svc_name="$(basename "$svc_file")"
+        dest_file="$SYSTEMD_DEST/$svc_name"
+        if [[ ! -f "$dest_file" ]] || ! diff -q "$svc_file" "$dest_file" &>/dev/null; then
+            cp "$svc_file" "$dest_file"
+            log_info "[OK] systemd 服务已同步: $svc_name"
+            daemon_reload=1
+        fi
+    done
+    if (( daemon_reload == 1 )); then
+        systemctl daemon-reload
+        log_info "[OK] systemctl daemon-reload 完成"
+    fi
+fi
+
 # 确保基础设施服务（Redis / PostgreSQL）正在运行
 log_info "确保 Redis 运行中..."
 systemctl start redis 2>/dev/null || systemctl start redis-server 2>/dev/null || \
