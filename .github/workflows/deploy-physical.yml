@@ -39,6 +39,12 @@ jobs:
             echo "Branch:     $BRANCH"
             echo "Run setup:  $RUN_SETUP"
 
+            # ── Step 0: 引导安装 git（全新服务器可能未安装）────────────────────
+            if ! command -v git &>/dev/null; then
+              echo "--- git 未安装，执行引导安装 ---"
+              apt-get update -qq && apt-get install -y --no-install-recommends git
+            fi
+
             # ── Step 1: 配置 git 凭证（支持私有仓库，公开仓库也兼容）─────────────
             git config --global credential.helper \
               '!f() { echo "username=x-access-token"; echo "password='"${GITHUB_TOKEN}"'"; }; f'
