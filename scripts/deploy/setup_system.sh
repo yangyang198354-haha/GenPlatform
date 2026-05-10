@@ -150,10 +150,37 @@ install_dnf() {
     }
     log_info "[OK] 基础包安装完成"
 
-    # Python 3.12：alinux/CentOS 仓库可能只有 python3.11/3.9，尝试安装 3.12
+    # Python 3.12：alinux3/CentOS 仓库通常不直接提供，尝试安装；失败不退出
     if ! command -v python3.12 &>/dev/null; then
-        log_warn "[WARN] python3.12 未找到，尝试从 SCL/IUS 安装（可能失败，请手动安装）"
+        log_warn "[WARN] python3.12 未找到，尝试安装..."
         $PM install -y python3.12 python3.12-devel 2>/dev/null || true
+        # 仍未找到则尝试 alternatives 创建软链接（用系统最高版本 python3 替代）
+        if ! command -v python3.12 &>/dev/null; then
+            log_warn "[WARN] python3.12 安装失败。系统 python3 版本: $(python3 --version 2>/dev/null || echo '未知')"
+            log_warn "       deploy_physical.sh 需要 python3.12，如系统不满足请升级 OS 或手动编译 Python 3.12"
+        fi
+    else
+        log_info "[SKIP] python3.12 已存在: $(python3.12 --version)"
+    fi
+
+    # PostgreSQL 15 + pgvector（PGDG rpm 官方源）
+    log_info "--- 安装 PostgreSQL 15 + pgvector（PGDG 源）---"
+    # RHEL 8 / alinux3 / CentOS Stream 8 均兼容 EL-8 包
+    local PGDG_RPM="https://download.postgresql.org/pub/repos/yum/reporpms/EL-8-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
+    $PM install -y "$PGDG_RPM" 2>/dev/null || true
+    # 禁用系统内置的 postgresql 模块，避免版本冲突
+    $PM -qy module disable postgresql 2>/dev/null || true
+    $PM install -y postgresql15-server postgresql15-contrib 2>/dev/null || \
+        log_warn "[WARN] PostgreSQL 15 安装失败，请手动安装: https://www.postgresql.org/download/linux/redhat/"
+    if command -v pg_config &>/dev/null || [ -f /usr/pgsql-15/bin/pg_config ]; then
+        # pgvector（依赖 postgresql15-devel）
+        $PM install -y postgresql15-devel 2>/dev/null || true
+        $PM install -y pgvector_15 2>/dev/null || \
+            log_warn "[WARN] pgvector_15 安装失败（可能 PGDG 尚未提供），向量检索功能需手动安装"
+        # 初始化 PostgreSQL 数据目录（首次必须）
+        if [ ! -f /var/lib/pgsql/15/data/PG_VERSION ]; then
+            /usr/pgsql-15/bin/postgresql-15-setup initdb 2>/dev/null || true
+        fi
     fi
 
     # ffmpeg / tesseract / poppler（EPEL 提供，可能不完整）
@@ -186,10 +213,12 @@ fi
 
 # ── 4. 启用服务开机自启 ───────────────────────────────────────────────────────
 log_info "--- 步骤 8/8: 启用服务开机自启 ---"
-systemctl enable postgresql
+# postgresql 在 alinux 上服务名可能为 postgresql-15
+systemctl enable postgresql-15 2>/dev/null || systemctl enable postgresql 2>/dev/null || \
+    log_warn "[WARN] postgresql 服务未找到，请确认 PostgreSQL 安装是否成功"
 systemctl enable redis-server 2>/dev/null || systemctl enable redis 2>/dev/null || true
-systemctl enable nginx
-log_info "[OK] 服务开机自启已配置"
+systemctl enable nginx 2>/dev/null || true
+log_info "[OK] 服务开机自启已配置（失败项见上方警告）"
 
 # ── 5. 创建部署目录 ───────────────────────────────────────────────────────────
 log_info "--- 创建部署目录: $APP_DIR ---"
