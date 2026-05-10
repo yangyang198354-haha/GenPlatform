@@ -113,18 +113,28 @@ if [[ -f "$VENV_DIR/bin/python" ]]; then
 fi
 
 if [[ ! -f "$VENV_DIR/bin/python" ]]; then
-    if "$PYTHON_BIN" -m venv "$VENV_DIR" 2>/dev/null; then
-        log_info "[OK] venv 创建完成: $VENV_DIR (${PYTHON_VERSION})"
-    else
-        # ensurepip 可能不可用（源码编译的 Python 缺少 SSL/pip bootstrap）
-        log_warn "[WARN] venv 创建失败（ensurepip 不可用），使用 --without-pip 模式..."
-        "$PYTHON_BIN" -m venv --without-pip "$VENV_DIR"
-        # 通过 get-pip.py 手动安装 pip
-        curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
-        "$VENV_DIR/bin/python" /tmp/get-pip.py
-        rm -f /tmp/get-pip.py
-        log_info "[OK] venv 创建完成（无 ensurepip 模式）: $VENV_DIR (${PYTHON_VERSION})"
+    log_info "创建 venv: $VENV_DIR..."
+    # 尝试三种方式（不静默错误便于诊断）
+    VENV_OK=false
+    if "$PYTHON_BIN" -m venv "$VENV_DIR" 2>&1; then
+        VENV_OK=true
+        log_info "[OK] venv 创建完成（含 pip）"
+    elif "$PYTHON_BIN" -m venv --without-pip "$VENV_DIR" 2>&1; then
+        VENV_OK=true
+        log_warn "[WARN] venv 创建完成（无 pip，将后续手动安装）"
+    elif "$PYTHON_BIN" -m venv --without-pip --copies "$VENV_DIR" 2>&1; then
+        VENV_OK=true
+        log_warn "[WARN] venv 创建完成（无 pip，硬拷贝模式）"
     fi
+    # 验证 binary 是否真的生成（venv 命令返回 0 但未创建 binary 的情况）
+    if [[ "$VENV_OK" != "true" ]] || [[ ! -f "$VENV_DIR/bin/python" ]]; then
+        log_error "venv 创建失败：$PYTHON_BIN -m venv 无法生成 $VENV_DIR/bin/python"
+        log_error "请确认已安装 python3.x-pip / python3.x-setuptools 子包"
+        log_error "alinux3 命令: dnf install -y python3.11-pip python3.11-setuptools"
+        ls -la "$VENV_DIR/bin/" 2>&1 || true
+        exit 1
+    fi
+    log_info "[OK] venv binary 已就位: $VENV_DIR/bin/python (${PYTHON_VERSION})"
 else
     log_info "[SKIP] venv 已存在（Python ${EXISTING_VER:-unknown}），跳过创建"
 fi

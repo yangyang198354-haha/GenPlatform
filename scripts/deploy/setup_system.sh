@@ -170,13 +170,20 @@ install_dnf() {
     # alinux3/RHEL8: python3.9 通过 AppStream 模块流提供，python3.11+ 可能不直接可用
     _install_python_rhel() {
         local PM="$1"
-        # 尝试直接安装各版本
+        # 尝试直接安装各版本（含 pip 子包，alinux3 上 python3.x-pip 是单独分包）
         for pkg in python3.12 python3.11 python39 python3.9; do
-            $PM install -y "$pkg" "${pkg}-devel" 2>/dev/null && return 0
+            if $PM install -y "$pkg" "${pkg}-devel" 2>/dev/null; then
+                # 顺带装 pip 子包（如不存在会失败但不影响主流程，源码编译版自带 pip）
+                $PM install -y "${pkg}-pip" "${pkg}-setuptools" 2>/dev/null || true
+                return 0
+            fi
         done
         # 尝试通过 AppStream 模块流启用 Python 3.9
         if $PM module enable -y python39 2>/dev/null; then
-            $PM install -y python39 python39-devel 2>/dev/null && return 0
+            if $PM install -y python39 python39-devel 2>/dev/null; then
+                $PM install -y python39-pip python39-setuptools 2>/dev/null || true
+                return 0
+            fi
         fi
         # 最后手段：从 python.org 编译安装 Python 3.11
         log_warn "[WARN] 包管理器无法提供 Python 3.9+，从源码编译 Python 3.11（约 5-10 分钟）..."
