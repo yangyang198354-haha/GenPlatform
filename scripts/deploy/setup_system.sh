@@ -137,6 +137,22 @@ install_dnf() {
     local PM="${PKG_MANAGER:-dnf}"
     log_warn "$PM 安装模式（CentOS/RHEL/alinux）— 部分功能需手动验证"
 
+    # ── 预修复：之前残留的 PGDG 仓库在 alinux3 上路径错误 ─────────────────────
+    # alinux3 的 $releasever=3，但 PGDG 镜像路径是 rhel-8/，导致 404
+    # 任何旧的 pgdg-*.repo 都会让 dnf 在 metadata refresh 阶段失败，阻塞所有安装
+    log_info "检查并修复残留的 PGDG 仓库（alinux3 路径兼容性）..."
+    for repo_file in /etc/yum.repos.d/pgdg-*.repo; do
+        [[ ! -f "$repo_file" ]] && continue
+        # 把 $releasever 和数字版本（如 rhel-3-）替换为 rhel-8
+        sed -i \
+            -e 's|/redhat/rhel-\$releasever-|/redhat/rhel-8-|g' \
+            -e 's|/redhat/rhel-[0-9]\+-|/redhat/rhel-8-|g' \
+            "$repo_file" 2>/dev/null || true
+        log_info "[OK] 已修复仓库路径: $repo_file"
+    done
+    # 清理 dnf 缓存以丢弃 404 缓存的 metadata
+    $PM clean all 2>/dev/null || true
+
     $PM install -y epel-release 2>/dev/null || true
     $PM install -y \
         python3 python3-devel \
@@ -274,6 +290,15 @@ install_dnf() {
                 /etc/yum.repos.d/pgdg-redhat-all.repo 2>/dev/null || true
         fi
     fi
+    # 立刻修复 alinux3 路径问题（$releasever=3，但 PGDG 实际路径是 rhel-8）
+    for repo_file in /etc/yum.repos.d/pgdg-*.repo; do
+        [[ ! -f "$repo_file" ]] && continue
+        sed -i \
+            -e 's|/redhat/rhel-\$releasever-|/redhat/rhel-8-|g' \
+            -e 's|/redhat/rhel-[0-9]\+-|/redhat/rhel-8-|g' \
+            "$repo_file" 2>/dev/null || true
+    done
+    $PM clean all 2>/dev/null || true
     # 禁用系统内置的 postgresql 模块，避免版本冲突
     $PM -qy module disable postgresql 2>/dev/null || true
     if ! $PM install -y postgresql15-server postgresql15-contrib; then
