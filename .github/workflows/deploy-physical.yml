@@ -38,11 +38,12 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           RUN_SETUP: ${{ github.event.inputs.run_setup }}
+          PUBLIC_HOST: ${{ secrets.PROD_HOST }}
         with:
           host: ${{ secrets.PROD_HOST }}
           username: ${{ secrets.PROD_USER }}
           password: ${{ secrets.PROD_PASSWORD }}
-          envs: RUN_SETUP
+          envs: RUN_SETUP,PUBLIC_HOST
           command_timeout: 90m
           script: |
             set -e
@@ -60,7 +61,9 @@ jobs:
               SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(50))")
               ENCRYPTION_KEY=$(python3 -c "import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
               PG_PASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
-              SERVER_IP=$(hostname -I | awk '{print $1}')
+              INTERNAL_IP=$(hostname -I | awk '{print $1}')
+              # PUBLIC_HOST 通过 envs 从 secrets.PROD_HOST 注入（公网 IP）
+              PUB="${PUBLIC_HOST:-$INTERNAL_IP}"
 
               mkdir -p "$APP_DIR/app"
               cat > "$ENV_FILE" <<ENVEOF
@@ -73,8 +76,8 @@ jobs:
             POSTGRES_PASSWORD=${PG_PASS}
             DATABASE_URL=postgresql://postgres:${PG_PASS}@localhost:5432/content_gen_platform
             REDIS_URL=redis://localhost:6379/0
-            ALLOWED_HOSTS=localhost,127.0.0.1,${SERVER_IP}
-            CORS_ALLOWED_ORIGINS=http://${SERVER_IP}
+            ALLOWED_HOSTS=localhost,127.0.0.1,${INTERNAL_IP},${PUB}
+            CORS_ALLOWED_ORIGINS=http://${PUB}
             STORAGE_BACKEND=local
             MEDIA_ROOT=/opt/genplatform/media
             EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
@@ -84,9 +87,25 @@ jobs:
             ENVEOF
 
               chmod 600 "$ENV_FILE"
-              echo "[OK] .env 已生成（ALLOWED_HOSTS 当前为 IP，如有域名请事后修改）"
+              echo "[OK] .env 已生成（ALLOWED_HOSTS 包含内网 IP 和公网 IP）"
             else
               echo "[SKIP] .env 已存在，跳过生成"
+            fi
+
+            # ── 2a-patch: 幂等补丁——确保已有 .env 包含 PUBLIC_HOST ──────────
+            if [ -f "$ENV_FILE" ] && [ -n "$PUBLIC_HOST" ]; then
+              if ! grep -q "ALLOWED_HOSTS=.*$PUBLIC_HOST" "$ENV_FILE"; then
+                sed -i "s/^ALLOWED_HOSTS=\(.*\)/ALLOWED_HOSTS=\1,$PUBLIC_HOST/" "$ENV_FILE"
+                echo "[OK] Patched ALLOWED_HOSTS to include $PUBLIC_HOST"
+              else
+                echo "[SKIP] ALLOWED_HOSTS already contains $PUBLIC_HOST"
+              fi
+              if ! grep -q "CORS_ALLOWED_ORIGINS=.*$PUBLIC_HOST" "$ENV_FILE"; then
+                sed -i "s|^CORS_ALLOWED_ORIGINS=\(.*\)|CORS_ALLOWED_ORIGINS=\1,http://$PUBLIC_HOST|" "$ENV_FILE"
+                echo "[OK] Patched CORS_ALLOWED_ORIGINS to include http://$PUBLIC_HOST"
+              else
+                echo "[SKIP] CORS_ALLOWED_ORIGINS already contains $PUBLIC_HOST"
+              fi
             fi
 
             # ── 2b: 停止 Docker 容器（释放内存，物理机部署接管端口 80）──────
