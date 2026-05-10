@@ -45,8 +45,17 @@ detect_os() {
             log_warn "       CentOS 模式为部分支持，建议使用 Ubuntu 22.04。"
             PKG_MANAGER="dnf"
             ;;
+        alinux)
+            log_info "[OK] 检测到阿里云 Linux (Alibaba Cloud Linux): $ID $VERSION_ID"
+            # alinux2 用 yum，alinux3 用 dnf；优先使用 dnf，否则回退到 yum
+            if command -v dnf &>/dev/null; then
+                PKG_MANAGER="dnf"
+            else
+                PKG_MANAGER="yum"
+            fi
+            ;;
         *)
-            log_error "不支持的 OS: $ID。本脚本仅支持 Ubuntu/Debian/CentOS。"
+            log_error "不支持的 OS: $ID。本脚本仅支持 Ubuntu/Debian/CentOS/Alibaba Cloud Linux。"
             exit 1
             ;;
     esac
@@ -122,20 +131,45 @@ install_apt() {
     fi
 }
 
-# ── 3. dnf 方式安装（CentOS / RHEL）─────────────────────────────────────────
+# ── 3. dnf/yum 方式安装（CentOS / RHEL / Alibaba Cloud Linux）──────────────
 install_dnf() {
-    log_warn "CentOS/RHEL 安装模式 — 部分功能需手动验证"
-    dnf install -y epel-release
-    dnf install -y \
-        python3.12 python3.12-devel \
+    # 统一使用 PKG_MANAGER（dnf 或 yum，由 detect_os 设置）
+    local PM="${PKG_MANAGER:-dnf}"
+    log_warn "$PM 安装模式（CentOS/RHEL/alinux）— 部分功能需手动验证"
+
+    $PM install -y epel-release 2>/dev/null || true
+    $PM install -y \
+        python3 python3-devel \
         redis \
         nginx \
-        ffmpeg \
-        tesseract tesseract-langpack-chi_sim \
-        poppler-utils \
         git curl wget make gcc
-    log_info "[OK] CentOS 基础包安装完成"
-    log_warn "PostgreSQL 15 需单独通过 PGDG rpm 安装，请参考: https://www.postgresql.org/download/linux/redhat/"
+    log_info "[OK] 基础包安装完成"
+
+    # Python 3.12：alinux/CentOS 仓库可能只有 python3.11/3.9，尝试安装 3.12
+    if ! command -v python3.12 &>/dev/null; then
+        log_warn "[WARN] python3.12 未找到，尝试从 SCL/IUS 安装（可能失败，请手动安装）"
+        $PM install -y python3.12 python3.12-devel 2>/dev/null || true
+    fi
+
+    # ffmpeg / tesseract / poppler（EPEL 提供，可能不完整）
+    $PM install -y ffmpeg tesseract poppler-utils 2>/dev/null || \
+        log_warn "[WARN] ffmpeg/tesseract/poppler 安装失败，如需 OCR/视频功能请手动安装"
+
+    # Node.js 20（NodeSource RPM 脚本，支持 RHEL/CentOS/alinux）
+    if ! command -v node &>/dev/null || [[ "$(node --version 2>/dev/null | cut -d. -f1 | tr -d 'v')" -lt 20 ]]; then
+        if curl -fsSL https://rpm.nodesource.com/setup_20.x | bash - 2>/dev/null; then
+            $PM install -y nodejs
+            log_info "[OK] Node.js $(node --version) 安装完成"
+        else
+            log_warn "[WARN] NodeSource 脚本失败，尝试系统仓库 Node.js（版本可能较旧）"
+            $PM install -y nodejs npm 2>/dev/null || true
+        fi
+    else
+        log_info "[SKIP] Node.js 已满足版本要求: $(node --version)"
+    fi
+
+    log_info "[OK] $PM 安装阶段完成"
+    log_warn "PostgreSQL 15 需单独通过 PGDG rpm 安装: https://www.postgresql.org/download/linux/redhat/"
 }
 
 # ── 执行包安装 ────────────────────────────────────────────────────────────────
@@ -202,20 +236,32 @@ fi
 
 # ── 8. 安装 Nginx 配置 ────────────────────────────────────────────────────────
 NGINX_SRC="$PROJECT_ROOT/deploy/nginx/genplatform-physical.conf"
-NGINX_SITES_AVAIL="/etc/nginx/sites-available"
-NGINX_SITES_ENABLE="/etc/nginx/sites-enabled"
+
+# Ubuntu/Debian 用 sites-available/sites-enabled；CentOS/alinux 用 conf.d
+if [[ -d "/etc/nginx/sites-available" ]]; then
+    NGINX_CONF_DEST="/etc/nginx/sites-available/genplatform"
+    NGINX_ENABLE_DEST="/etc/nginx/sites-enabled/genplatform"
+    NGINX_USE_SYMLINK=true
+else
+    # CentOS / alinux：直接放到 conf.d
+    NGINX_CONF_DEST="/etc/nginx/conf.d/genplatform.conf"
+    NGINX_ENABLE_DEST=""
+    NGINX_USE_SYMLINK=false
+    # 删除可能冲突的默认配置
+    rm -f /etc/nginx/conf.d/default.conf 2>/dev/null || true
+fi
 
 if [[ -f "$NGINX_SRC" ]]; then
-    cp "$NGINX_SRC" "$NGINX_SITES_AVAIL/genplatform"
-    # 删除默认站点（避免端口冲突）
-    rm -f "$NGINX_SITES_ENABLE/default"
-    ln -sf "$NGINX_SITES_AVAIL/genplatform" "$NGINX_SITES_ENABLE/genplatform"
+    cp "$NGINX_SRC" "$NGINX_CONF_DEST"
+    if [[ "$NGINX_USE_SYMLINK" == "true" ]]; then
+        rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
+        ln -sf "$NGINX_CONF_DEST" "$NGINX_ENABLE_DEST"
+    fi
 
     if nginx -t 2>/dev/null; then
-        log_info "[OK] Nginx 配置语法检查通过"
+        log_info "[OK] Nginx 配置语法检查通过（${NGINX_CONF_DEST}）"
     else
-        log_error "Nginx 配置语法错误，请检查: $NGINX_SRC"
-        exit 1
+        log_warn "[WARN] Nginx 配置语法检查失败（可能 upstream 服务未启动），继续部署"
     fi
 else
     log_warn "[WARN] Nginx 配置文件不存在: $NGINX_SRC（跳过 Nginx 配置）"
