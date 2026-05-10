@@ -1,0 +1,141 @@
+name: Physical Deploy to Production
+
+# 手动触发（workflow_dispatch）。默认物理机部署；Docker 部署走 ci.yml。
+on:
+  workflow_dispatch:
+    inputs:
+      run_setup:
+        description: '执行系统环境安装（首次部署必须 true；后续热更新可设为 false 加速）'
+        type: boolean
+        default: true
+
+jobs:
+  deploy-physical:
+    name: Physical Deploy to Production (Aliyun)
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Deploy on production server (physical)
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_SETUP: ${{ github.event.inputs.run_setup }}
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          password: ${{ secrets.PROD_PASSWORD }}
+          envs: GITHUB_TOKEN,RUN_SETUP
+          command_timeout: 90m
+          script: |
+            set -e
+
+            APP_DIR=/opt/genplatform
+            BRANCH=main
+            REPO_HTTPS=https://github.com/yangyang198354-haha/GenPlatform.git
+
+            echo "===== GenPlatform 物理机部署 (GitHub Actions) ====="
+            echo "APP_DIR:    $APP_DIR"
+            echo "Branch:     $BRANCH"
+            echo "Run setup:  $RUN_SETUP"
+
+            # ── Step 1: 配置 git 凭证（支持私有仓库，公开仓库也兼容）─────────────
+            git config --global credential.helper \
+              '!f() { echo "username=x-access-token"; echo "password='"${GITHUB_TOKEN}"'"; }; f'
+
+            # ── Step 2: 克隆或更新代码 ───────────────────────────────────────────
+            mkdir -p "$APP_DIR"
+            if [ -d "$APP_DIR/app/.git" ]; then
+              echo "--- 代码更新: git pull ---"
+              git -C "$APP_DIR/app" remote set-url origin "$REPO_HTTPS"
+              git -C "$APP_DIR/app" fetch origin
+              git -C "$APP_DIR/app" checkout "$BRANCH"
+              git -C "$APP_DIR/app" pull origin "$BRANCH"
+            else
+              echo "--- 首次克隆: git clone ---"
+              git clone --branch "$BRANCH" "$REPO_HTTPS" "$APP_DIR/app"
+            fi
+
+            # ── Step 3: 生成 .env（首次部署自动生成，已存在则跳过）──────────────
+            ENV_FILE="$APP_DIR/app/.env"
+            if [ ! -f "$ENV_FILE" ]; then
+              echo "--- 生成 .env（首次部署）---"
+
+              SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(50))")
+              ENCRYPTION_KEY=$(python3 -c "import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
+              PG_PASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+              SERVER_IP=$(hostname -I | awk '{print $1}')
+
+              cat > "$ENV_FILE" <<ENVEOF
+            DJANGO_SECRET_KEY=${SECRET_KEY}
+            DJANGO_SETTINGS_MODULE=config.settings.production
+            DEBUG=False
+            ENCRYPTION_KEY=${ENCRYPTION_KEY}
+            POSTGRES_DB=content_gen_platform
+            POSTGRES_USER=postgres
+            POSTGRES_PASSWORD=${PG_PASS}
+            DATABASE_URL=postgresql://postgres:${PG_PASS}@localhost:5432/content_gen_platform
+            REDIS_URL=redis://localhost:6379/0
+            ALLOWED_HOSTS=localhost,127.0.0.1,${SERVER_IP}
+            CORS_ALLOWED_ORIGINS=http://${SERVER_IP}
+            STORAGE_BACKEND=local
+            MEDIA_ROOT=/opt/genplatform/media
+            EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+            HF_ENDPOINT=https://hf-mirror.com
+            APP_DIR=/opt/genplatform
+            BRANCH=main
+            ENVEOF
+
+              chmod 600 "$ENV_FILE"
+              echo "[OK] .env 已生成，请事后确认 ALLOWED_HOSTS / CORS_ALLOWED_ORIGINS 与实际域名一致"
+            else
+              echo "[SKIP] .env 已存在，跳过生成"
+            fi
+
+            # ── Step 4: 系统依赖安装（幂等，首次必须；后续可跳过）───────────────
+            if [ "$RUN_SETUP" = "true" ]; then
+              echo "--- 系统环境安装 (setup_system.sh) ---"
+              APP_DIR="$APP_DIR" bash "$APP_DIR/app/scripts/deploy/setup_system.sh"
+            else
+              echo "--- 跳过系统环境安装（run_setup=false）---"
+            fi
+
+            # ── Step 5: 物理机完整部署 ──────────────────────────────────────────
+            # REPO_URL 设为空，deploy_physical.sh 检测到 APP_CODE_DIR/.git 存在
+            # 会走 git pull 分支（代码在 Step 2 已更新）。
+            echo "--- 物理机部署 (deploy_physical.sh) ---"
+            APP_DIR="$APP_DIR" bash "$APP_DIR/app/scripts/deploy/deploy_physical.sh"
+
+            echo "===== 物理机部署完成 ====="
+
+      - name: Post-deploy smoke test (from GitHub runner)
+        env:
+          BASE_URL: http://${{ secrets.PROD_HOST }}
+        run: |
+          echo "--- 从 GitHub Runner 执行冒烟测试 ---"
+          # 等待服务完全启动（deploy_physical.sh 内部已等待，此处额外保险等待）
+          sleep 10
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST -H "Content-Type: application/json" -d '{}' \
+            "$BASE_URL/api/v1/auth/login/" 2>/dev/null || echo "000")
+
+          case "$HTTP_CODE" in
+            200|400|401|422)
+              echo "[OK] API 响应正常: HTTP $HTTP_CODE"
+              ;;
+            *)
+              echo "[FAIL] API 响应异常: HTTP $HTTP_CODE"
+              exit 1
+              ;;
+          esac
+
+          # 检查前端静态文件
+          FE_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/" 2>/dev/null || echo "000")
+          if [ "$FE_CODE" = "200" ]; then
+            echo "[OK] 前端页面可访问: HTTP $FE_CODE"
+          else
+            echo "[WARN] 前端页面响应: HTTP $FE_CODE（可能 Nginx 配置需确认）"
+          fi
+
+          echo "--- 冒烟测试完成 ---"
