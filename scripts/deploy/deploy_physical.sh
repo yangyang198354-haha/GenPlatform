@@ -38,7 +38,9 @@ log_info "当前 commit: $CURRENT_COMMIT"
 
 # ── 步骤 3: 同步代码 ──────────────────────────────────────────────────────────
 log_info "--- 步骤 3/12: 同步代码到 $APP_CODE_DIR ---"
-if [[ -d "$APP_CODE_DIR/.git" ]]; then
+if [[ "${SKIP_CODE_SYNC:-}" == "1" ]]; then
+    log_info "[SKIP] 代码同步已跳过（SKIP_CODE_SYNC=1，代码由外部工具（scp/rsync）同步）"
+elif [[ -d "$APP_CODE_DIR/.git" ]]; then
     log_info "检测到已有代码目录，执行 git pull..."
     git -C "$APP_CODE_DIR" fetch origin
     git -C "$APP_CODE_DIR" checkout "$BRANCH"
