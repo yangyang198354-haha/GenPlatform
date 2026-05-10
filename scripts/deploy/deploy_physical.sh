@@ -107,6 +107,36 @@ if [[ ! -f "$VENV_DIR/bin/python" ]]; then
 else
     log_info "[SKIP] venv 已存在（Python ${EXISTING_VER:-unknown}），跳过创建"
 fi
+
+# 确保 pip 在 venv 中可用（源码编译 Python 可能无 SSL，导致 ensurepip/get-pip 失败）
+if ! "$VENV_DIR/bin/python" -m pip --version &>/dev/null 2>&1; then
+    log_warn "[WARN] venv 中 pip 不可用，尝试安装..."
+    # 方案1: ensurepip
+    "$VENV_DIR/bin/python" -m ensurepip --upgrade 2>/dev/null || true
+    # 方案2: get-pip.py（http 模式，绕过 https SSL 问题）
+    if ! "$VENV_DIR/bin/python" -m pip --version &>/dev/null 2>&1; then
+        curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py 2>/dev/null || \
+            curl -fSL http://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py 2>/dev/null || true
+        [[ -f /tmp/get-pip.py ]] && \
+            "$VENV_DIR/bin/python" /tmp/get-pip.py --trusted-host pypi.org --trusted-host files.pythonhosted.org 2>/dev/null || true
+        rm -f /tmp/get-pip.py
+    fi
+    # 方案3: 从 altinstall 安装路径复制 pip
+    if ! "$VENV_DIR/bin/python" -m pip --version &>/dev/null 2>&1; then
+        PY_MINOR="${PYTHON_BIN##python}"  # e.g. "3.11"
+        for pip_src in "/usr/local/bin/pip${PY_MINOR}" "/usr/local/bin/pip3" "/usr/local/lib/python${PY_MINOR}/site-packages/pip"; do
+            if [[ -f "$pip_src" ]]; then
+                cp "$pip_src" "$VENV_DIR/bin/pip" 2>/dev/null && break
+            fi
+        done
+    fi
+    if "$VENV_DIR/bin/python" -m pip --version &>/dev/null 2>&1; then
+        log_info "[OK] pip 安装成功"
+    else
+        log_error "无法在 venv 中安装 pip，请检查 Python SSL 模块是否编译正确"
+        exit 1
+    fi
+fi
 "$VENV_DIR/bin/pip" install --upgrade pip --quiet 2>/dev/null || true
 
 # ── 步骤 5: 安装 Python 依赖 ──────────────────────────────────────────────────
