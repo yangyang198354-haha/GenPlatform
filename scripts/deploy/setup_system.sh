@@ -164,29 +164,56 @@ install_dnf() {
         fi
         # 最后手段：从 python.org 编译安装 Python 3.11
         log_warn "[WARN] 包管理器无法提供 Python 3.9+，从源码编译 Python 3.11（约 5-10 分钟）..."
-        $PM install -y openssl-devel bzip2-devel libffi-devel zlib-devel xz-devel \
+        # 安装编译依赖（openssl-devel 是 SSL 支持的关键，尝试多个包名）
+        for ossl_pkg in openssl-devel openssl11-devel; do
+            if $PM install -y "$ossl_pkg" 2>/dev/null; then
+                log_info "[OK] OpenSSL dev 已安装: $ossl_pkg"
+                break
+            fi
+        done
+        $PM install -y bzip2-devel libffi-devel zlib-devel xz-devel \
             readline-devel sqlite-devel 2>/dev/null || true
+        # 验证 OpenSSL 头文件存在（缺失则 Python 将无 SSL 支持）
+        if ! ls /usr/include/openssl/ssl.h /usr/include/openssl11/ssl.h 2>/dev/null | grep -q ssl.h; then
+            log_warn "[WARN] OpenSSL 头文件未找到（/usr/include/openssl/ssl.h），Python 可能无 SSL 支持"
+        fi
         local PY_VER="3.11.9"
         local PY_SRC="/tmp/Python-${PY_VER}"
         curl -fsSL "https://www.python.org/ftp/python/${PY_VER}/Python-${PY_VER}.tar.xz" \
             -o "/tmp/Python-${PY_VER}.tar.xz" || return 1
         tar xf "/tmp/Python-${PY_VER}.tar.xz" -C /tmp/
         cd "$PY_SRC"
-        ./configure --enable-optimizations --prefix=/usr/local --with-ensurepip=install \
-            2>/dev/null
-        make -j"$(nproc)" 2>/dev/null
-        make altinstall 2>/dev/null
+        # 不静默 configure（让 SSL 检测问题显示出来）
+        ./configure --enable-optimizations --prefix=/usr/local --with-ensurepip=install
+        make -j"$(nproc)"
+        make altinstall
         cd /tmp
         rm -rf "$PY_SRC" "/tmp/Python-${PY_VER}.tar.xz"
-        command -v python3.11 && return 0
+        # 验证 SSL 支持
+        if command -v python3.11 &>/dev/null; then
+            if python3.11 -c "import ssl; print('[OK] SSL:', ssl.OPENSSL_VERSION)" 2>/dev/null; then
+                log_info "[OK] Python 3.11 SSL 支持验证通过"
+            else
+                log_warn "[WARN] Python 3.11 无 SSL 支持，pip install 将无法访问 HTTPS PyPI"
+            fi
+            return 0
+        fi
         return 1
     }
-    # 仅当没有 3.9+ 时才安装
+    # 检测已有 Python 是否有 SSL 支持；无 SSL 则删除并重新编译
     NEED_PY=true
     for pv in python3.12 python3.11 python3.10 python3.9; do
         if command -v "$pv" &>/dev/null; then
-            NEED_PY=false
-            break
+            if "$pv" -c "import ssl" 2>/dev/null; then
+                NEED_PY=false
+                break
+            else
+                log_warn "[WARN] $pv 无 SSL 支持（源码编译时缺少 openssl-devel），将删除并重新编译..."
+                PY_MINOR="${pv##python}"
+                rm -f "/usr/local/bin/${pv}" "/usr/local/bin/pip${PY_MINOR}" \
+                       "/usr/local/bin/python3" "/usr/local/bin/pip3" 2>/dev/null || true
+                break
+            fi
         fi
     done
     if [[ "$NEED_PY" == "true" ]]; then

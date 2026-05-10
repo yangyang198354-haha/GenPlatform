@@ -111,29 +111,37 @@ fi
 # 确保 pip 在 venv 中可用（源码编译 Python 可能无 SSL，导致 ensurepip/get-pip 失败）
 if ! "$VENV_DIR/bin/python" -m pip --version &>/dev/null 2>&1; then
     log_warn "[WARN] venv 中 pip 不可用，尝试安装..."
-    # 方案1: ensurepip
-    "$VENV_DIR/bin/python" -m ensurepip --upgrade 2>/dev/null || true
-    # 方案2: get-pip.py（http 模式，绕过 https SSL 问题）
+    # 方案1: ensurepip（不加 --upgrade，使用内嵌 wheel，无需网络/SSL）
+    "$VENV_DIR/bin/python" -m ensurepip 2>/dev/null || true
+    # 方案2: 从系统 Python 的 site-packages 直接复制 pip 包（源码编译 altinstall 会装 pip）
+    if ! "$VENV_DIR/bin/python" -m pip --version &>/dev/null 2>&1; then
+        PY_MINOR="${PYTHON_BIN##python}"  # e.g. "3.11"
+        SYSTEM_SITE="/usr/local/lib/python${PY_MINOR}/site-packages"
+        VENV_SITE="$VENV_DIR/lib/python${PY_MINOR}/site-packages"
+        if [[ -d "$SYSTEM_SITE/pip" ]]; then
+            log_warn "[WARN] 从系统 Python 复制 pip 包到 venv..."
+            cp -r "$SYSTEM_SITE/pip" "$VENV_SITE/" 2>/dev/null || true
+            for di in "$SYSTEM_SITE/pip"-*.dist-info "$SYSTEM_SITE/setuptools"-*.dist-info; do
+                [[ -d "$di" ]] && cp -r "$di" "$VENV_SITE/" 2>/dev/null || true
+            done
+            cp -r "$SYSTEM_SITE/setuptools" "$VENV_SITE/" 2>/dev/null || true
+        fi
+    fi
+    # 方案3: get-pip.py（优先 https，降级 http，用 --trusted-host 绕过证书校验）
     if ! "$VENV_DIR/bin/python" -m pip --version &>/dev/null 2>&1; then
         curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py 2>/dev/null || \
             curl -fSL http://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py 2>/dev/null || true
         [[ -f /tmp/get-pip.py ]] && \
-            "$VENV_DIR/bin/python" /tmp/get-pip.py --trusted-host pypi.org --trusted-host files.pythonhosted.org 2>/dev/null || true
+            "$VENV_DIR/bin/python" /tmp/get-pip.py \
+                --trusted-host pypi.org --trusted-host files.pythonhosted.org \
+                --no-ssl-check 2>/dev/null || true
         rm -f /tmp/get-pip.py
-    fi
-    # 方案3: 从 altinstall 安装路径复制 pip
-    if ! "$VENV_DIR/bin/python" -m pip --version &>/dev/null 2>&1; then
-        PY_MINOR="${PYTHON_BIN##python}"  # e.g. "3.11"
-        for pip_src in "/usr/local/bin/pip${PY_MINOR}" "/usr/local/bin/pip3" "/usr/local/lib/python${PY_MINOR}/site-packages/pip"; do
-            if [[ -f "$pip_src" ]]; then
-                cp "$pip_src" "$VENV_DIR/bin/pip" 2>/dev/null && break
-            fi
-        done
     fi
     if "$VENV_DIR/bin/python" -m pip --version &>/dev/null 2>&1; then
         log_info "[OK] pip 安装成功"
     else
         log_error "无法在 venv 中安装 pip，请检查 Python SSL 模块是否编译正确"
+        log_error "建议: bash scripts/deploy/setup_system.sh 将重新编译带 SSL 的 Python"
         exit 1
     fi
 fi
