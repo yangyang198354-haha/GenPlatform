@@ -210,7 +210,7 @@ log_info "安装 PyTorch CPU-only..."
 "$VENV_DIR/bin/pip" install \
     "torch==2.3.1+cpu" \
     --index-url https://download.pytorch.org/whl/cpu \
-    --quiet
+    --progress-bar off
 log_info "[OK] PyTorch CPU-only 安装完成"
 
 log_info "安装其余 Python 依赖（跳过 torch，避免覆盖 CPU-only 版本）..."
@@ -220,24 +220,55 @@ echo "torch==2.3.1+cpu" > /tmp/torch_constraint.txt
     -r "$BACKEND_DIR/requirements.txt" \
     --constraint /tmp/torch_constraint.txt \
     --extra-index-url https://download.pytorch.org/whl/cpu \
-    --quiet
+    --progress-bar off
 rm -f /tmp/torch_constraint.txt
 log_info "[OK] Python 依赖安装完成"
 
 # ── 步骤 6: 前端构建 ──────────────────────────────────────────────────────────
 log_info "--- 步骤 6/12: 前端构建 ---"
+log_info "FRONTEND_DIR=$FRONTEND_DIR"
 if [[ -f "$FRONTEND_DIR/package.json" ]]; then
+    # 检查 npm/node 可用性
+    if ! command -v node &>/dev/null; then
+        log_error "node 不可用，请运行 setup_system.sh 安装 Node.js 20"
+        exit 1
+    fi
+    if ! command -v npm &>/dev/null; then
+        log_error "npm 不可用"
+        exit 1
+    fi
+    log_info "Node: $(node --version), npm: $(npm --version)"
+    # 确保静态文件目录存在
+    mkdir -p "$STATIC_DIR"
+    # 不用 --silent，否则错误信息也被吞
     (
         cd "$FRONTEND_DIR"
-        npm ci --silent
+        # 优先用国内镜像加速 npm install
+        npm config set registry https://registry.npmmirror.com 2>/dev/null || true
+        if [[ -f package-lock.json ]]; then
+            npm ci --no-audit --no-fund
+        else
+            log_warn "[WARN] package-lock.json 缺失，使用 npm install（构建可能不可重现）"
+            npm install --no-audit --no-fund
+        fi
         npm run build
-    )
+    ) || {
+        log_error "前端构建失败，请检查 npm 日志"
+        exit 1
+    }
     # 清空旧的静态文件（保留 Django collectstatic 子目录）
     rm -rf "${STATIC_DIR:?}/assets" "${STATIC_DIR:?}/index.html" 2>/dev/null || true
     cp -r "$FRONTEND_DIR/dist/." "$STATIC_DIR/"
     log_info "[OK] 前端构建完成，产物已复制到 $STATIC_DIR"
 else
-    log_warn "[WARN] frontend/package.json 不存在，跳过前端构建"
+    log_warn "[WARN] $FRONTEND_DIR/package.json 不存在，跳过前端构建"
+    # 列出实际目录帮诊断
+    if [[ -d "$FRONTEND_DIR" ]]; then
+        log_warn "  $FRONTEND_DIR 内容:"
+        ls -la "$FRONTEND_DIR" 2>&1 | head -20 || true
+    else
+        log_warn "  $FRONTEND_DIR 目录不存在"
+    fi
 fi
 
 # ── 步骤 7: PostgreSQL 初始化 ─────────────────────────────────────────────────
