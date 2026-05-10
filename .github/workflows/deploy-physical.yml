@@ -42,7 +42,16 @@ jobs:
             # ── Step 0: 引导安装 git（全新服务器可能未安装）────────────────────
             if ! command -v git &>/dev/null; then
               echo "--- git 未安装，执行引导安装 ---"
-              apt-get update -qq && apt-get install -y --no-install-recommends git
+              if command -v apt-get &>/dev/null; then
+                apt-get update -qq && apt-get install -y --no-install-recommends git
+              elif command -v dnf &>/dev/null; then
+                dnf install -y git
+              elif command -v yum &>/dev/null; then
+                yum install -y git
+              else
+                echo "ERROR: 无法识别包管理器（非 apt/dnf/yum），请手动安装 git"
+                exit 1
+              fi
             fi
 
             # ── Step 1: 配置 git 凭证（支持私有仓库，公开仓库也兼容）─────────────
