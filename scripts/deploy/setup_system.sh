@@ -150,18 +150,28 @@ install_dnf() {
     }
     log_info "[OK] 基础包安装完成"
 
-    # Python 3.12：alinux3/CentOS 仓库通常不直接提供，尝试安装；失败不退出
+    # Python 3.12（首选）→ 3.11 → 3.9（PyTorch 2.x 最低要求 3.9）
+    # alinux3/RHEL8 默认仓库通常不含 3.12，但含 3.11；EPEL 可提供 3.9
     if ! command -v python3.12 &>/dev/null; then
-        log_warn "[WARN] python3.12 未找到，尝试安装..."
+        log_warn "[WARN] python3.12 未找到，尝试安装 python3.12..."
         $PM install -y python3.12 python3.12-devel 2>/dev/null || true
-        # 仍未找到则尝试 alternatives 创建软链接（用系统最高版本 python3 替代）
-        if ! command -v python3.12 &>/dev/null; then
-            log_warn "[WARN] python3.12 安装失败。系统 python3 版本: $(python3 --version 2>/dev/null || echo '未知')"
-            log_warn "       deploy_physical.sh 需要 python3.12，如系统不满足请升级 OS 或手动编译 Python 3.12"
-        fi
-    else
-        log_info "[SKIP] python3.12 已存在: $(python3.12 --version)"
     fi
+    if ! command -v python3.12 &>/dev/null && ! command -v python3.11 &>/dev/null; then
+        log_warn "[WARN] 尝试安装 python3.11（alinux3/RHEL8 默认仓库应提供）..."
+        $PM install -y python3.11 python3.11-devel 2>/dev/null || true
+    fi
+    if ! command -v python3.12 &>/dev/null && ! command -v python3.11 &>/dev/null && \
+       ! command -v python3.9 &>/dev/null; then
+        log_warn "[WARN] 尝试安装 python39（EPEL）..."
+        $PM install -y python39 python39-devel 2>/dev/null || true
+    fi
+    # 汇报实际可用版本
+    for pv in python3.12 python3.11 python3.10 python3.9; do
+        if command -v "$pv" &>/dev/null; then
+            log_info "[OK] Python 可用: $pv ($($pv --version 2>&1))"
+            break
+        fi
+    done
 
     # PostgreSQL 15 + pgvector（PGDG rpm 官方源）
     log_info "--- 安装 PostgreSQL 15 + pgvector（PGDG 源）---"
