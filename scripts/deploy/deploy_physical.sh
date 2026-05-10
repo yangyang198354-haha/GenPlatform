@@ -392,18 +392,35 @@ log_info "确保 PostgreSQL 运行中..."
 systemctl start postgresql-15 2>/dev/null || systemctl start postgresql 2>/dev/null || \
     log_warn "[WARN] PostgreSQL 启动失败"
 
-# 使用 restart（幂等：不论服务是否已运行均重启）
-# 热更新场景（run_setup=false）也需要 restart 来加载新代码
-systemctl restart genplatform-backend
-log_info "[OK] genplatform-backend 已启动"
+# 服务重启辅助函数（失败时输出诊断信息，可选致命/非致命）
+_restart_service() {
+    local svc="$1"
+    local fatal="${2:-false}"
+    if systemctl restart "$svc" 2>&1; then
+        log_info "[OK] $svc 已启动"
+        return 0
+    fi
+    log_error "$svc 启动失败，诊断信息："
+    systemctl status "$svc" --no-pager --lines=20 2>&1 | head -30 || true
+    journalctl -u "$svc" --no-pager --lines=30 2>&1 | tail -30 || true
+    if [[ "$fatal" == "true" ]]; then
+        return 1
+    fi
+    log_warn "[WARN] $svc 启动失败，但部署继续（请手动排查后启动）"
+    return 0
+}
 
-systemctl restart genplatform-celery
-log_info "[OK] genplatform-celery 已启动"
+# backend 是核心服务，启动失败必须 fail（API 不可用就没意义）
+_restart_service genplatform-backend true || exit 1
 
-systemctl restart genplatform-celery-beat
-log_info "[OK] genplatform-celery-beat 已启动"
+# celery worker 启动可能因为下载嵌入模型超时（首次部署低内存机器）；非致命
+# 部署后可手动: systemctl restart genplatform-celery
+_restart_service genplatform-celery false
 
-log_info "[OK] 所有服务已启动"
+# celery-beat 相对轻量，但也设为非致命避免阻塞
+_restart_service genplatform-celery-beat false
+
+log_info "[OK] 服务启动阶段完成（warn 见上方）"
 
 # ── 步骤 11: 重启 Nginx ───────────────────────────────────────────────────────
 log_info "--- 步骤 11/12: 重载/启动 Nginx ---"

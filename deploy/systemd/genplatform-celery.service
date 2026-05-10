@@ -32,10 +32,13 @@ ExecReload=/bin/kill -s HUP $MAINPID
 Restart=always
 RestartSec=10
 
-# TimeoutStartSec=300: 嵌入模型首次下载最多 5 分钟
+# TimeoutStartSec=900: 嵌入模型首次下载 + 低内存服务器 OOM 重试，最多 15 分钟
 # 避免 systemd 因启动超时 kill Worker（对应 REQ-DEPLOY-FUNC-010）
-TimeoutStartSec=300
+TimeoutStartSec=900
 TimeoutStopSec=60
+
+# OOM 保护：低优先级被杀，但启动阶段提高优先级避免 OOM Killer 中断 import
+OOMScoreAdjust=-500
 
 # PID 文件路径（forking 模式必须）
 PIDFile=/run/genplatform/celery-worker.pid
