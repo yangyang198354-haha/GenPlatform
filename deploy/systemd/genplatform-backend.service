@@ -12,12 +12,16 @@ WorkingDirectory=/opt/genplatform/app/project_workspace/content_gen_platform/src
 EnvironmentFile=/opt/genplatform/.env
 
 # 使用 Gunicorn 的 UvicornWorker 支持 ASGI（Django Channels / SSE）
+# workers=2: 内存有限的服务器（4G）实测 4 workers 全部 OOM Killed
+# max-requests + jitter: 每个 worker 处理一定请求后自动重启，释放可能泄漏的内存
 ExecStart=/opt/genplatform/venv/bin/gunicorn \
     config.asgi:application \
     --worker-class uvicorn.workers.UvicornWorker \
-    --workers 4 \
+    --workers 2 \
     --bind 0.0.0.0:8000 \
     --timeout 120 \
+    --max-requests 1000 \
+    --max-requests-jitter 100 \
     --log-file /opt/genplatform/logs/gunicorn.log \
     --access-logfile /opt/genplatform/logs/gunicorn-access.log \
     --error-logfile /opt/genplatform/logs/gunicorn-error.log
@@ -34,6 +38,9 @@ Restart=always
 RestartSec=5
 StartLimitBurst=3
 StartLimitIntervalSec=60
+
+# OOM 保护：低优先级被 OOM Killer 选中（与 celery 一致）
+OOMScoreAdjust=-500
 
 # 安全加固
 PrivateTmp=true
