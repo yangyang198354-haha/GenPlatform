@@ -60,9 +60,29 @@ fi
 
 # ── 步骤 4: Python 虚拟环境 ───────────────────────────────────────────────────
 log_info "--- 步骤 4/12: 创建/更新 Python 虚拟环境 ---"
+# 优先使用 python3.12，降级顺序：3.11 → 3.10 → 3.9 → python3
+PYTHON_BIN=""
+for candidate in python3.12 python3.11 python3.10 python3.9 python3; do
+    if command -v "$candidate" &>/dev/null; then
+        PYTHON_BIN="$candidate"
+        break
+    fi
+done
+if [[ -z "$PYTHON_BIN" ]]; then
+    log_error "未找到可用的 Python 3.x 解释器，请先安装 Python 3.9+"
+    exit 1
+fi
+PYTHON_VERSION="$($PYTHON_BIN --version 2>&1)"
+if [[ "$PYTHON_BIN" != "python3.12" ]]; then
+    log_warn "[WARN] python3.12 不可用，使用 $PYTHON_BIN ($PYTHON_VERSION)"
+    log_warn "       部分功能可能需要 Python 3.12，如有问题请升级 Python 版本"
+else
+    log_info "[OK] 使用 $PYTHON_BIN ($PYTHON_VERSION)"
+fi
+
 if [[ ! -f "$VENV_DIR/bin/python" ]]; then
-    python3.12 -m venv "$VENV_DIR"
-    log_info "[OK] venv 创建完成: $VENV_DIR"
+    "$PYTHON_BIN" -m venv "$VENV_DIR"
+    log_info "[OK] venv 创建完成: $VENV_DIR (${PYTHON_VERSION})"
 else
     log_info "[SKIP] venv 已存在，跳过创建"
 fi
