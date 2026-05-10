@@ -92,12 +92,22 @@ if [[ -f "$VENV_DIR/bin/python" ]]; then
 fi
 
 if [[ ! -f "$VENV_DIR/bin/python" ]]; then
-    "$PYTHON_BIN" -m venv "$VENV_DIR"
-    log_info "[OK] venv 创建完成: $VENV_DIR (${PYTHON_VERSION})"
+    if "$PYTHON_BIN" -m venv "$VENV_DIR" 2>/dev/null; then
+        log_info "[OK] venv 创建完成: $VENV_DIR (${PYTHON_VERSION})"
+    else
+        # ensurepip 可能不可用（源码编译的 Python 缺少 SSL/pip bootstrap）
+        log_warn "[WARN] venv 创建失败（ensurepip 不可用），使用 --without-pip 模式..."
+        "$PYTHON_BIN" -m venv --without-pip "$VENV_DIR"
+        # 通过 get-pip.py 手动安装 pip
+        curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+        "$VENV_DIR/bin/python" /tmp/get-pip.py
+        rm -f /tmp/get-pip.py
+        log_info "[OK] venv 创建完成（无 ensurepip 模式）: $VENV_DIR (${PYTHON_VERSION})"
+    fi
 else
     log_info "[SKIP] venv 已存在（Python ${EXISTING_VER:-unknown}），跳过创建"
 fi
-"$VENV_DIR/bin/pip" install --upgrade pip --quiet
+"$VENV_DIR/bin/pip" install --upgrade pip --quiet 2>/dev/null || true
 
 # ── 步骤 5: 安装 Python 依赖 ──────────────────────────────────────────────────
 log_info "--- 步骤 5/12: 安装 Python 依赖 ---"
