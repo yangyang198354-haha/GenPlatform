@@ -227,6 +227,17 @@ log_info "[OK] Python 依赖安装完成"
 # ── 步骤 6: 前端构建 ──────────────────────────────────────────────────────────
 log_info "--- 步骤 6/12: 前端构建 ---"
 log_info "FRONTEND_DIR=$FRONTEND_DIR"
+
+# 释放内存：停掉已有服务（避免 npm build OOM）
+# 内存有限的服务器上 gunicorn 4 workers + celery + sentence-transformers 模型 +
+# Vite/Rollup 构建会很容易超内存。restart 在 step 10 重新启动。
+log_info "构建前停止已有服务以释放内存..."
+systemctl stop genplatform-celery 2>/dev/null || true
+systemctl stop genplatform-celery-beat 2>/dev/null || true
+systemctl stop genplatform-backend 2>/dev/null || true
+sync && echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+log_info "[OK] 服务已停止；构建后将在步骤 10 重新启动"
+
 if [[ -f "$FRONTEND_DIR/package.json" ]]; then
     # 检查 npm/node 可用性
     if ! command -v node &>/dev/null; then
@@ -251,9 +262,15 @@ if [[ -f "$FRONTEND_DIR/package.json" ]]; then
             log_warn "[WARN] package-lock.json 缺失，使用 npm install（构建可能不可重现）"
             npm install --no-audit --no-fund
         fi
-        npm run build
+        # 限制 Node heap 上限，避免 OOM Killer 杀进程（默认 1.7GB，限制为 1GB）
+        NODE_OPTIONS="--max-old-space-size=1024" npm run build
     ) || {
         log_error "前端构建失败，请检查 npm 日志"
+        # 显示内存状态帮诊断
+        log_error "当前内存状态："
+        free -h 2>&1 || true
+        log_error "OOM 历史："
+        dmesg 2>/dev/null | grep -i "killed process" | tail -5 || true
         exit 1
     }
     # 清空旧的静态文件（保留 Django collectstatic 子目录）
