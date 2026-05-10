@@ -89,7 +89,20 @@ jobs:
               echo "[SKIP] .env 已存在，跳过生成"
             fi
 
-            # ── 2b: 系统依赖安装（幂等；首次必须，后续可跳过）──────────────
+            # ── 2b: 停止 Docker 容器（释放内存，物理机部署接管端口 80）──────
+            # Docker 容器与物理机服务争用端口 80 和内存，部署前必须停止。
+            echo "--- 停止 Docker 容器（释放内存和端口）---"
+            if command -v docker &>/dev/null; then
+              docker compose -f /opt/content-gen-platform/docker-compose.yml down 2>/dev/null || true
+              RUNNING=$(docker ps -q 2>/dev/null || true)
+              [ -n "$RUNNING" ] && docker stop $RUNNING 2>/dev/null || true
+              docker system prune -f 2>/dev/null || true
+              echo "[OK] Docker 容器已停止"
+            else
+              echo "[SKIP] Docker 未安装，跳过"
+            fi
+
+            # ── 2c: 系统依赖安装（幂等；首次必须，后续可跳过）──────────────
             if [ "$RUN_SETUP" = "true" ]; then
               echo "--- 系统环境安装 (setup_system.sh) ---"
               APP_DIR="$APP_DIR" bash "$APP_DIR/app/scripts/deploy/setup_system.sh"

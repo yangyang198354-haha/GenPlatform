@@ -142,7 +142,12 @@ install_dnf() {
         python3 python3-devel \
         redis \
         nginx \
-        git curl wget make gcc
+        git curl wget make gcc || {
+        log_warn "[WARN] 包安装被中断（可能内存不足），尝试逐个安装..."
+        for pkg in python3 python3-devel redis nginx git curl wget make gcc; do
+            $PM install -y "$pkg" 2>/dev/null || log_warn "[WARN] 安装失败（跳过）: $pkg"
+        done
+    }
     log_info "[OK] 基础包安装完成"
 
     # Python 3.12：alinux/CentOS 仓库可能只有 python3.11/3.9，尝试安装 3.12
