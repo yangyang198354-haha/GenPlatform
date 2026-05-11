@@ -1,0 +1,143 @@
+name: Diagnose KB Processing Stuck
+
+# 针对 KB 文档卡在"正在加载向量模型"阶段的专项诊断
+# 用法: gh workflow run diagnose-kb.yml
+# 完成后: gh run view --log
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    name: Diagnose KB Stuck Documents
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Collect KB diagnostics from production
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          password: ${{ secrets.PROD_PASSWORD }}
+          command_timeout: 10m
+          script: |
+            echo "=== KB DIAG START ==="
+            BACKEND_DIR=/opt/genplatform/app/project_workspace/content_gen_platform/src/backend
+            VENV_PY=/opt/genplatform/venv/bin/python
+
+            # ── 1. Celery 服务状态 ────────────────────────────────────────────
+            echo ""
+            echo "=== KB DIAG 1: systemctl status genplatform-celery ==="
+            systemctl status genplatform-celery --no-pager --lines=40 2>&1 || true
+
+            echo ""
+            echo "=== KB DIAG 2: celery worker 进程 ==="
+            ps -ef | grep -E 'celery|sentence_transform' | grep -v grep || echo "[NO CELERY PROCESSES]"
+
+            # ── 2. Celery 日志（重点看最近报错） ─────────────────────────────
+            echo ""
+            echo "=== KB DIAG 3: celery-worker.log 最后 200 行 ==="
+            tail -200 /opt/genplatform/logs/celery-worker.log 2>/dev/null || echo "[NOT FOUND]"
+
+            echo ""
+            echo "=== KB DIAG 4: celery-worker.log 中所有 ERROR/WARN ==="
+            grep -iE 'error|warn|traceback|killed|timeout|oom|softtimelimit|memory' \
+              /opt/genplatform/logs/celery-worker.log 2>/dev/null | tail -100 \
+              || echo "[NO ERRORS FOUND]"
+
+            # ── 3. OOM 历史 ──────────────────────────────────────────────────
+            echo ""
+            echo "=== KB DIAG 5: OOM killer 历史 ==="
+            dmesg -T 2>/dev/null | grep -iE "killed process|out of memory|oom" | tail -30 \
+              || journalctl -k --no-pager | grep -iE "killed process|out of memory|oom" | tail -30 \
+              || echo "[NO OOM EVENTS]"
+
+            # ── 4. 内存 ──────────────────────────────────────────────────────
+            echo ""
+            echo "=== KB DIAG 6: free -h ==="
+            free -h 2>&1 || true
+
+            # ── 5. Celery 队列（Redis） ──────────────────────────────────────
+            echo ""
+            echo "=== KB DIAG 7: Redis Celery 队列长度 ==="
+            redis-cli -n 0 LLEN default 2>/dev/null || true
+            redis-cli -n 0 LLEN video 2>/dev/null || true
+            redis-cli -n 0 LLEN publish 2>/dev/null || true
+            redis-cli -n 0 KEYS 'celery-task-meta-*' 2>/dev/null | head -20 || true
+
+            # ── 6. 数据库：卡住的文档 ────────────────────────────────────────
+            echo ""
+            echo "=== KB DIAG 8: 卡在 processing 的所有文档 ==="
+            if [ -x "$VENV_PY" ] && [ -d "$BACKEND_DIR" ]; then
+              (cd "$BACKEND_DIR" && "$VENV_PY" -c "
+            import django, os
+            os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.production')
+            django.setup()
+            from apps.knowledge_base.models import Document
+            from django.utils import timezone
+            from datetime import timedelta
+            qs = Document.objects.filter(status='processing').order_by('-created_at')[:10]
+            print(f'共有 {qs.count() if hasattr(qs, \"count\") else len(list(qs))} 个 processing 文档')
+            for d in qs:
+                age = (timezone.now() - d.created_at).total_seconds()
+                print(f'  [id={d.id}] name={d.name!r} user_id={d.user_id} '
+                      f'progress={d.progress} progress_message={d.progress_message!r} '
+                      f'chunk_count={d.chunk_count} age={age:.0f}s '
+                      f'created_at={d.created_at.isoformat()}')
+                print(f'    file_path={d.file_path!r} file_type={d.file_type}')
+                print(f'    error_message={d.error_message!r}')
+            " 2>&1)
+            else
+              echo "[SKIP] venv or backend not found"
+            fi
+
+            # ── 7. 检查模型是否已下载到本地 ──────────────────────────────────
+            echo ""
+            echo "=== KB DIAG 9: HuggingFace 模型缓存 ==="
+            HF_HOME=${HF_HOME:-/home/genplatform/.cache/huggingface}
+            for dir in "$HF_HOME" /root/.cache/huggingface /opt/genplatform/.cache/huggingface; do
+              if [ -d "$dir" ]; then
+                echo "[FOUND] $dir"
+                find "$dir" -maxdepth 6 -type d -name '*bge*' 2>/dev/null
+                find "$dir" -maxdepth 6 -type f -name '*.safetensors' -o -name '*.bin' 2>/dev/null | head -10
+                du -sh "$dir" 2>/dev/null
+              fi
+            done
+            ls -la /home/genplatform 2>&1 | head -20 || true
+
+            # ── 8. 测试模型能否加载（关键验证） ──────────────────────────────
+            echo ""
+            echo "=== KB DIAG 10: 实测加载 embedding 模型 (timeout 120s) ==="
+            if [ -x "$VENV_PY" ] && [ -d "$BACKEND_DIR" ]; then
+              timeout 120 sudo -u genplatform bash -c "
+                export HF_ENDPOINT=https://hf-mirror.com
+                export HF_HUB_DISABLE_PROGRESS_BARS=1
+                cd $BACKEND_DIR
+                $VENV_PY -c '
+            import time, sys, os
+            os.environ.setdefault(\"DJANGO_SETTINGS_MODULE\", \"config.settings.production\")
+            import django; django.setup()
+            from django.conf import settings
+            print(f\"EMBEDDING_MODEL={settings.EMBEDDING_MODEL}\")
+            print(f\"HF_ENDPOINT={os.environ.get(\\\"HF_ENDPOINT\\\")}\")
+            t0 = time.time()
+            from sentence_transformers import SentenceTransformer
+            print(f\"import sentence_transformers OK in {time.time()-t0:.1f}s\")
+            t0 = time.time()
+            m = SentenceTransformer(settings.EMBEDDING_MODEL, device=\"cpu\")
+            print(f\"SentenceTransformer loaded in {time.time()-t0:.1f}s\")
+            t0 = time.time()
+            v = m.encode([\"测试\"], normalize_embeddings=True)
+            print(f\"encode OK in {time.time()-t0:.2f}s, dim={len(v[0])}\")
+            '
+              " 2>&1 || echo "[TIMEOUT or FAILED]"
+            fi
+
+            # ── 9. systemd 进程历史（celery 是否反复重启） ───────────────────
+            echo ""
+            echo "=== KB DIAG 11: journalctl celery 最近 200 行 ==="
+            journalctl -u genplatform-celery --no-pager --lines=200 2>&1 | tail -200 || true
+
+            echo ""
+            echo "=== KB DIAG END ==="
