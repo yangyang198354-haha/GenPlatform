@@ -1,10 +1,20 @@
 """Unit tests for knowledge_base services (text extraction, chunking, processing)."""
 import os
+from datetime import timedelta
 import pytest
 import numpy as np
 from unittest.mock import patch, MagicMock
+from django.utils import timezone
 from apps.knowledge_base.services import (
-    _chunk_text, _extract_text, _ocr_pdf, process_document, search, _update_progress,
+    _chunk_text,
+    _extract_text,
+    _ocr_pdf,
+    process_document,
+    search,
+    _update_progress,
+    reap_stale_processing_documents,
+    STALE_PROCESSING_THRESHOLD_SECONDS,
+    STALE_PROCESSING_REAP_MESSAGE,
 )
 from apps.knowledge_base.models import Document, DocumentChunk
 
@@ -883,3 +893,160 @@ class TestVectorFieldDimension:
             "(3) update EXPECTED_DIM in this test, "
             "(4) update all mock arrays to np.zeros((len(texts), N))."
         )
+
+
+# ── Stale-processing reaper ──────────────────────────────────────────────────
+#
+# These tests guard the recovery path for documents whose Celery worker was
+# SIGKILL'd (OOM) mid-task: the row is left at status='processing' indefinitely
+# because the kill bypasses every Python exception handler.  The sweeper is
+# the only thing that unsticks the UI without a manual DB edit.
+
+class TestReapStaleProcessingDocumentsConfig:
+    """Pure constant guards — no DB required."""
+
+    def test_threshold_exceeds_celery_hard_time_limit(self):
+        """
+        The reaper threshold MUST be larger than the Celery task hard
+        time_limit; otherwise a legitimately long-running task would be
+        misclassified as orphaned and prematurely flipped to 'error'.
+
+        This is a structural invariant: if anyone bumps _TIME_LIMIT in
+        tasks.py they must also bump STALE_PROCESSING_THRESHOLD_SECONDS
+        to keep the ordering.
+        """
+        from apps.knowledge_base.tasks import _TIME_LIMIT
+        assert STALE_PROCESSING_THRESHOLD_SECONDS > _TIME_LIMIT, (
+            f"STALE_PROCESSING_THRESHOLD_SECONDS={STALE_PROCESSING_THRESHOLD_SECONDS}s "
+            f"must exceed Celery _TIME_LIMIT={_TIME_LIMIT}s. "
+            "Otherwise the reaper will kill still-running tasks."
+        )
+
+    def test_reap_message_is_non_empty(self):
+        """The user must always see WHY processing was aborted."""
+        assert STALE_PROCESSING_REAP_MESSAGE.strip(), \
+            "STALE_PROCESSING_REAP_MESSAGE must be non-empty"
+
+    def test_reap_message_mentions_retry_path(self):
+        """The reap message should hint at the recovery action (retry)."""
+        assert "重试" in STALE_PROCESSING_REAP_MESSAGE or "重新上传" in STALE_PROCESSING_REAP_MESSAGE, (
+            "User-facing reap message should mention retry or re-upload "
+            "so the user has actionable next steps."
+        )
+
+
+@pytest.mark.django_db
+class TestReapStaleProcessingDocuments:
+    """Behavioural tests for the stale-task reaper."""
+
+    @staticmethod
+    def _make_doc(user, *, status, age_seconds):
+        """Helper: create a doc with a backdated created_at."""
+        doc = Document.objects.create(
+            user=user,
+            name=f"doc_{status}_{age_seconds}s",
+            original_filename="x.txt",
+            file_path="/tmp/x.txt",
+            file_size_bytes=1,
+            file_type="txt",
+            status=status,
+        )
+        # auto_now_add forces created_at on create; override after save via UPDATE
+        Document.objects.filter(pk=doc.pk).update(
+            created_at=timezone.now() - timedelta(seconds=age_seconds),
+        )
+        doc.refresh_from_db()
+        return doc
+
+    def test_reaps_old_processing_document(self, user):
+        """A processing doc older than the threshold flips to error."""
+        old = self._make_doc(
+            user,
+            status="processing",
+            age_seconds=STALE_PROCESSING_THRESHOLD_SECONDS + 60,
+        )
+        n = reap_stale_processing_documents()
+        assert n == 1
+        old.refresh_from_db()
+        assert old.status == "error"
+        assert old.error_message == STALE_PROCESSING_REAP_MESSAGE
+        assert old.progress_message == "处理被中断"
+
+    def test_does_not_reap_recent_processing_document(self, user):
+        """A processing doc younger than threshold stays processing."""
+        young = self._make_doc(
+            user,
+            status="processing",
+            age_seconds=STALE_PROCESSING_THRESHOLD_SECONDS - 60,
+        )
+        n = reap_stale_processing_documents()
+        assert n == 0
+        young.refresh_from_db()
+        assert young.status == "processing", (
+            "Recent processing docs must NOT be reaped — that would kill "
+            "the cold-start model-download window."
+        )
+
+    def test_does_not_reap_available_document(self, user):
+        """Completed docs are immune even if very old."""
+        done = self._make_doc(
+            user,
+            status="available",
+            age_seconds=STALE_PROCESSING_THRESHOLD_SECONDS * 10,
+        )
+        n = reap_stale_processing_documents()
+        assert n == 0
+        done.refresh_from_db()
+        assert done.status == "available"
+
+    def test_does_not_reap_error_document(self, user):
+        """Already-errored docs aren't touched (status is preserved)."""
+        errored = self._make_doc(
+            user,
+            status="error",
+            age_seconds=STALE_PROCESSING_THRESHOLD_SECONDS * 5,
+        )
+        errored.error_message = "原有错误信息"
+        errored.save(update_fields=["error_message"])
+        n = reap_stale_processing_documents()
+        assert n == 0
+        errored.refresh_from_db()
+        assert errored.error_message == "原有错误信息"
+
+    def test_returns_zero_when_no_documents(self, user):
+        """No docs at all → returns 0, doesn't raise."""
+        assert reap_stale_processing_documents() == 0
+
+    def test_user_scope_limits_to_one_user(self, user, db, django_user_model):
+        """user_id filter must only touch that user's docs."""
+        other = django_user_model.objects.create_user(
+            email="other@example.com", password="x"
+        )
+        mine = self._make_doc(
+            user, status="processing",
+            age_seconds=STALE_PROCESSING_THRESHOLD_SECONDS + 60,
+        )
+        theirs = self._make_doc(
+            other, status="processing",
+            age_seconds=STALE_PROCESSING_THRESHOLD_SECONDS + 60,
+        )
+        n = reap_stale_processing_documents(user_id=user.pk)
+        assert n == 1
+        mine.refresh_from_db()
+        theirs.refresh_from_db()
+        assert mine.status == "error"
+        assert theirs.status == "processing", (
+            "user_id filter must NOT touch other users' documents"
+        )
+
+    def test_reaps_multiple_stale_documents_in_one_call(self, user):
+        """All stale docs are reaped atomically."""
+        for i in range(3):
+            self._make_doc(
+                user, status="processing",
+                age_seconds=STALE_PROCESSING_THRESHOLD_SECONDS + 60 + i,
+            )
+        n = reap_stale_processing_documents()
+        assert n == 3
+        assert Document.objects.filter(status="processing").count() == 0
+        assert Document.objects.filter(status="error").count() == 3

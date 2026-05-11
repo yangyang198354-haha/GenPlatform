@@ -353,3 +353,182 @@ class TestUploadToVectorChainIntegration:
         assert results, "search() must find at least one chunk after the document was processed."
         assert any("knowledge" in r.content.lower() or "retrieval" in r.content.lower()
                    for r in results)
+
+
+# ── List-view stale-document sweep ────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestListViewSweepsStaleDocuments:
+    """
+    The KB list view must reap orphaned 'processing' rows on every fetch so
+    the user sees recovery as soon as they refresh — they should not have to
+    wait for a Celery worker restart.
+    """
+
+    def _make_stale_doc(self, user):
+        """Create a processing doc backdated past the reaper threshold."""
+        from datetime import timedelta
+        from django.utils import timezone
+        from apps.knowledge_base.services import STALE_PROCESSING_THRESHOLD_SECONDS
+        doc = Document.objects.create(
+            user=user,
+            name="stale doc",
+            original_filename="x.txt",
+            file_path="/tmp/x.txt",
+            file_size_bytes=1,
+            file_type="txt",
+            status="processing",
+        )
+        Document.objects.filter(pk=doc.pk).update(
+            created_at=timezone.now()
+            - timedelta(seconds=STALE_PROCESSING_THRESHOLD_SECONDS + 60),
+        )
+        return doc
+
+    def test_list_view_flips_stale_processing_to_error(self, auth_client):
+        client, user = auth_client
+        doc = self._make_stale_doc(user)
+
+        resp = client.get(DOCS_URL)
+        assert resp.status_code == status.HTTP_200_OK
+
+        doc.refresh_from_db()
+        assert doc.status == "error", (
+            "List view must invoke the reaper so orphaned docs are flipped to "
+            "'error' the moment the user refreshes the KB page."
+        )
+
+    def test_list_view_returns_other_users_documents_unchanged(
+        self, auth_client, auth_client2
+    ):
+        """Sweep must be scoped to the requesting user."""
+        client1, user1 = auth_client
+        _, user2 = auth_client2
+        # Stale doc for user2 — user1's list request must NOT touch it.
+        other_stale = self._make_stale_doc(user2)
+
+        resp = client1.get(DOCS_URL)
+        assert resp.status_code == status.HTTP_200_OK
+
+        other_stale.refresh_from_db()
+        assert other_stale.status == "processing", (
+            "User1's list fetch must not reap User2's stale documents."
+        )
+
+
+# ── Retry endpoint ────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestDocumentRetryView:
+    """Retry endpoint lets users re-enqueue a failed document without uploading
+    the file again."""
+
+    def _make_error_doc(self, user, tmp_path):
+        f = tmp_path / "retry.txt"
+        f.write_text("retry me", encoding="utf-8")
+        return Document.objects.create(
+            user=user,
+            name="retry doc",
+            original_filename="retry.txt",
+            file_path=str(f),
+            file_size_bytes=len("retry me"),
+            file_type="txt",
+            status="error",
+            error_message="处理被中断",
+            progress=40,
+            progress_message="处理被中断",
+        )
+
+    @patch("apps.knowledge_base.views.process_document_task")
+    def test_retry_success_returns_202(self, mock_task, auth_client, tmp_path):
+        client, user = auth_client
+        doc = self._make_error_doc(user, tmp_path)
+        resp = client.post(f"{DOCS_URL}{doc.pk}/retry/")
+
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        mock_task.delay.assert_called_once_with(doc.pk)
+
+    @patch("apps.knowledge_base.views.process_document_task")
+    def test_retry_resets_processing_state(self, mock_task, auth_client, tmp_path):
+        client, user = auth_client
+        doc = self._make_error_doc(user, tmp_path)
+        client.post(f"{DOCS_URL}{doc.pk}/retry/")
+
+        doc.refresh_from_db()
+        assert doc.status == "processing"
+        assert doc.progress == 0
+        assert doc.error_message == ""
+        assert doc.chunk_count == 0
+        assert doc.progress_message == "已重新排队"
+
+    @patch("apps.knowledge_base.views.process_document_task")
+    def test_retry_only_allowed_for_error_status(self, mock_task, auth_client, tmp_path):
+        client, user = auth_client
+        doc = self._make_error_doc(user, tmp_path)
+        doc.status = "processing"
+        doc.save(update_fields=["status"])
+
+        resp = client.post(f"{DOCS_URL}{doc.pk}/retry/")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        mock_task.delay.assert_not_called()
+
+    @patch("apps.knowledge_base.views.process_document_task")
+    def test_retry_rejects_available_documents(self, mock_task, auth_client, tmp_path):
+        """No point re-processing an already-available doc — refuse."""
+        client, user = auth_client
+        doc = self._make_error_doc(user, tmp_path)
+        doc.status = "available"
+        doc.save(update_fields=["status"])
+
+        resp = client.post(f"{DOCS_URL}{doc.pk}/retry/")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        mock_task.delay.assert_not_called()
+
+    @patch("apps.knowledge_base.views.process_document_task")
+    def test_retry_404_for_unknown_doc(self, mock_task, auth_client):
+        client, _ = auth_client
+        resp = client.post(f"{DOCS_URL}99999/retry/")
+        assert resp.status_code == status.HTTP_404_NOT_FOUND
+        mock_task.delay.assert_not_called()
+
+    @patch("apps.knowledge_base.views.process_document_task")
+    def test_retry_404_for_other_users_doc(
+        self, mock_task, auth_client, auth_client2, tmp_path
+    ):
+        """Users can only retry their own documents."""
+        client1, _ = auth_client
+        _, user2 = auth_client2
+        doc = self._make_error_doc(user2, tmp_path)
+
+        resp = client1.post(f"{DOCS_URL}{doc.pk}/retry/")
+        assert resp.status_code == status.HTTP_404_NOT_FOUND
+        mock_task.delay.assert_not_called()
+
+    @patch("apps.knowledge_base.views.process_document_task")
+    def test_retry_rejects_missing_source_file(self, mock_task, auth_client, tmp_path):
+        """If the on-disk file vanished, retrying would just fail again."""
+        client, user = auth_client
+        doc = self._make_error_doc(user, tmp_path)
+        os.remove(doc.file_path)
+
+        resp = client.post(f"{DOCS_URL}{doc.pk}/retry/")
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert "源文件" in resp.data["error"]
+        mock_task.delay.assert_not_called()
+
+    def test_retry_url_is_registered_before_pk_detail(self):
+        """
+        Regression guard: URL ordering bug. /documents/<int:pk>/ must come AFTER
+        /documents/<int:pk>/retry/ in urls.py — otherwise the detail view would
+        swallow /retry/ as if 'retry' were the pk format.
+
+        (DRF resolves URLs in the order patterns are registered, so the more
+        specific pattern must win.)
+        """
+        from django.urls import resolve
+        match = resolve("/api/v1/knowledge/documents/42/retry/")
+        assert match.url_name == "kb-document-retry", (
+            f"/documents/42/retry/ resolved to {match.url_name!r}, expected "
+            "'kb-document-retry'. Check urls.py ordering — the retry path must "
+            "be registered BEFORE the <int:pk>/ detail path."
+        )

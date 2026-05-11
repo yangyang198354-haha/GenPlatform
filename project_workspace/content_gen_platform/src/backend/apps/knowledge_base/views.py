@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 
 from .models import Document
 from .serializers import DocumentSerializer, BatchUploadResultSerializer
+from .services import reap_stale_processing_documents
 from .tasks import process_document_task
 from apps.accounts.models import User
 
@@ -35,6 +36,14 @@ class DocumentListCreateView(generics.ListCreateAPIView):
     parser_classes = [MultiPartParser]
 
     def get_queryset(self):
+        # Reap orphaned 'processing' rows for THIS user before returning the
+        # list. Indexed UPDATE with WHERE status='processing' AND created_at<X
+        # AND user_id=Y is fast and almost always a no-op (zero rows). This is
+        # the user-visible recovery path: whenever they refresh the KB page,
+        # any documents whose Celery worker was OOM-killed are flipped from a
+        # phantom "processing" to "error" so a retry button can render.
+        reap_stale_processing_documents(user_id=self.request.user.pk)
+
         qs = Document.objects.filter(user=self.request.user)
         search = self.request.query_params.get("search")
         if search:
@@ -268,3 +277,60 @@ class DocumentDetailView(generics.RetrieveUpdateDestroyAPIView):
             os.remove(instance.file_path)
         # Cascade deletes DocumentChunk via FK
         instance.delete()
+
+
+class DocumentRetryView(APIView):
+    """Re-enqueue processing for a document currently in 'error' state.
+
+    Lets the user recover from a transient failure (OOM, timeout, network
+    blip during model download) without re-uploading. Only 'error' docs are
+    retryable — refusing 'processing' avoids racing with a still-running task,
+    and refusing 'available' makes the button strictly remedial.
+    """
+
+    def post(self, request, pk):
+        try:
+            doc = Document.objects.get(pk=pk, user=request.user)
+        except Document.DoesNotExist:
+            return Response(
+                {"error": "文档不存在或无权限"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        if doc.status != "error":
+            return Response(
+                {
+                    "error": (
+                        "仅失败状态的文档可以重试，"
+                        f"当前状态: {doc.get_status_display()}"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Verify the underlying file is still on disk — if the user deleted
+        # the file out-of-band (or the storage volume was wiped), reprocessing
+        # would loop into another 'error'.
+        if not os.path.exists(doc.file_path):
+            return Response(
+                {"error": "源文件已丢失，无法重试，请重新上传"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        doc.status = "processing"
+        doc.progress = 0
+        doc.progress_message = "已重新排队"
+        doc.error_message = ""
+        doc.chunk_count = 0
+        doc.save(
+            update_fields=[
+                "status",
+                "progress",
+                "progress_message",
+                "error_message",
+                "chunk_count",
+            ]
+        )
+
+        process_document_task.delay(doc.pk)
+
+        return Response(DocumentSerializer(doc).data, status=status.HTTP_202_ACCEPTED)

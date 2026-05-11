@@ -72,8 +72,18 @@
       <el-table-column label="上传时间" width="160">
         <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="120">
+      <el-table-column label="操作" width="160">
         <template #default="{ row }">
+          <el-button
+            v-if="row.status === 'error'"
+            type="warning"
+            size="small"
+            :icon="IconRefresh"
+            circle
+            title="重试处理"
+            :loading="retryingIds.has(row.id)"
+            @click="retryDoc(row)"
+          />
           <el-button
             type="primary"
             size="small"
@@ -130,7 +140,7 @@
 <script setup>
 import { ref, markRaw, onMounted, onUnmounted, onActivated } from "vue";
 import { ElMessage } from "element-plus";
-import { Plus, Search, Delete, UploadFilled, FolderOpened, EditPen, InfoFilled } from "@element-plus/icons-vue";
+import { Plus, Search, Delete, UploadFilled, FolderOpened, EditPen, InfoFilled, RefreshRight } from "@element-plus/icons-vue";
 import { kbAPI } from "@/api";
 
 // markRaw prevents Vue reactivity proxy from wrapping icon components,
@@ -139,6 +149,7 @@ const IconPlus = markRaw(Plus);
 const IconDelete = markRaw(Delete);
 const IconFolderOpened = markRaw(FolderOpened);
 const IconEditPen = markRaw(EditPen);
+const IconRefresh = markRaw(RefreshRight);
 
 const documents = ref([]);
 const loading = ref(false);
@@ -154,6 +165,11 @@ const showRenameDialog = ref(false);
 const renameTarget = ref(null);
 const renameValue = ref("");
 const renaming = ref(false);
+
+// Retry state — set of doc ids currently being re-enqueued. Tracking by id
+// (instead of a single boolean) lets a user click retry on several failed docs
+// in quick succession without the buttons clobbering each other's spinner.
+const retryingIds = ref(new Set());
 
 // ── Polling ──────────────────────────────────────────────────────────────────
 // Poll individual documents that are still in "processing" state.
@@ -334,6 +350,31 @@ async function deleteDoc(id) {
   await kbAPI.delete(id);
   ElMessage.success("已删除");
   documents.value = documents.value.filter((d) => d.id !== id);
+}
+
+async function retryDoc(row) {
+  if (retryingIds.value.has(row.id)) return;
+  // Reactive Set: mutate then reassign so Vue sees the change.
+  retryingIds.value = new Set(retryingIds.value).add(row.id);
+  try {
+    const { data } = await kbAPI.retry(row.id);
+    // Replace the doc in-place with the server response (status='processing',
+    // progress=0, ...). Polling kicks in immediately so the user sees the
+    // progress bar resume.
+    const idx = documents.value.findIndex((d) => d.id === row.id);
+    if (idx !== -1) {
+      documents.value[idx] = { ...documents.value[idx], ...data };
+    }
+    _startPolling(row.id);
+    ElMessage.success("已重新排队，正在处理…");
+  } catch (err) {
+    const msg = err.response?.data?.error || "重试失败，请稍后再试";
+    ElMessage.error(msg);
+  } finally {
+    const next = new Set(retryingIds.value);
+    next.delete(row.id);
+    retryingIds.value = next;
+  }
 }
 
 // ── Directory upload ──────────────────────────────────────────────────────

@@ -27,6 +27,10 @@ class KnowledgeBaseConfig(AppConfig):
           - This runs in EVERY process that imports the app (manage.py,
             gunicorn workers, celery).  That is intentional: each OS process
             needs its own in-memory model instance.
+
+        Also registers the worker_ready signal so every Celery worker startup
+        triggers a sweep of stale 'processing' documents — see
+        `_sweep_stale_documents_on_worker_ready` for the rationale.
         """
         # Guard: only warm in the main interpreter, not during migrations or
         # manage.py commands where model download would be unexpected.
@@ -36,6 +40,12 @@ class KnowledgeBaseConfig(AppConfig):
 
         thread = threading.Thread(target=_prewarm_embedding_model, daemon=True)
         thread.start()
+
+        # Connect once at AppConfig ready; the celery import is cheap.
+        # weak=False because the connected function is module-scoped and
+        # safe to hold strongly.
+        from celery.signals import worker_ready  # noqa: PLC0415
+        worker_ready.connect(_sweep_stale_documents_on_worker_ready, weak=False)
 
 
 def _prewarm_embedding_model():
@@ -49,3 +59,27 @@ def _prewarm_embedding_model():
             "Embedding model pre-warm failed (will retry on first request).",
             exc_info=True,
         )
+
+
+def _sweep_stale_documents_on_worker_ready(sender=None, **kwargs):
+    """Reap orphaned 'processing' documents whenever a Celery worker starts.
+
+    Why this signal:
+      - Documents whose worker was SIGKILL'd by the OS OOM killer never get
+        a status='error' update because the kill happens outside Python.
+      - The next time *any* Celery worker boots (deploy, OOM recovery,
+        manual restart) is the natural moment to clean up the corpses:
+        the surviving worker has DB access and Django context is set up.
+      - This is intentionally global (no user_id filter) — at startup the
+        worker has no notion of "current user".
+    """
+    try:
+        from apps.knowledge_base.services import reap_stale_processing_documents  # noqa: PLC0415
+        n = reap_stale_processing_documents()
+        if n:
+            logger.info(
+                "Celery worker_ready sweep reaped %d orphaned 'processing' documents", n
+            )
+    except Exception:
+        # A failed sweep must NEVER prevent the worker from accepting tasks.
+        logger.exception("worker_ready stale-document sweep failed; continuing")

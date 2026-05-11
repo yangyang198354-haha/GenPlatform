@@ -1,10 +1,12 @@
 """Knowledge base processing: chunking, embedding, and RAG retrieval."""
 import logging
 import re
+from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 from django.conf import settings
+from django.utils import timezone
 from pgvector.django import L2Distance
 
 from .models import Document, DocumentChunk
@@ -13,6 +15,21 @@ if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
+
+# A document is considered "orphaned" if it has been in status='processing'
+# for longer than this threshold. Must be larger than the Celery hard time
+# limit (_TIME_LIMIT = 660 s in tasks.py) so we never reap a still-running
+# task — only ones whose worker was SIGKILL'd (typically by the OS OOM killer)
+# before the SoftTimeLimitExceeded handler could write status='error'.
+STALE_PROCESSING_THRESHOLD_SECONDS = 15 * 60  # 15 min (= 660 s hard kill + 240 s buffer)
+
+# User-facing message written to error_message when a doc is reaped. Includes
+# remediation guidance because the most common cause is server memory pressure
+# and the user can retry once the system has more headroom.
+STALE_PROCESSING_REAP_MESSAGE = (
+    "处理被中断（worker 进程在加载向量模型时异常退出，通常是服务器内存不足导致）。"
+    "请点击重试，或删除此文档后重新上传。"
+)
 
 # Lazy-loaded singleton embedding model
 _embedding_model: "SentenceTransformer | None" = None
@@ -126,6 +143,57 @@ def _chunk_text(text: str, chunk_size: int, overlap: int) -> List[str]:
         chunks.append(text[start:end])
         start += chunk_size - overlap
     return [c for c in chunks if c.strip()]
+
+
+def reap_stale_processing_documents(user_id: Optional[int] = None) -> int:
+    """Mark orphaned 'processing' documents as 'error' so they stop displaying
+    a phantom progress bar forever.
+
+    A document is "orphaned" when its Celery worker was SIGKILL'd (most
+    commonly by the OS OOM killer during embedding-model load) before any
+    Python exception handler could write status='error'. The soft/hard
+    time-limit safety net only fires when the worker process is still alive;
+    a hard SIGKILL silently leaves the row at status='processing' forever.
+
+    This function is the only way orphaned rows recover. It is called from:
+      - the Celery worker_ready signal (on every worker startup → cleans up
+        whatever was running when the previous worker died)
+      - the document list view (so users see recovery the moment they refresh
+        the KB page — no need to wait for a restart)
+
+    The threshold (STALE_PROCESSING_THRESHOLD_SECONDS) is deliberately larger
+    than the task's hard time_limit so a legitimately long-running task is
+    never misclassified as orphaned.
+
+    Args:
+        user_id: when given, only reap that user's documents (used from the
+            list view to avoid scanning the global table on every request).
+            When None, sweep across all users (used at worker startup).
+
+    Returns:
+        The number of documents transitioned from 'processing' to 'error'.
+    """
+    cutoff = timezone.now() - timedelta(seconds=STALE_PROCESSING_THRESHOLD_SECONDS)
+    qs = Document.objects.filter(status="processing", created_at__lt=cutoff)
+    if user_id is not None:
+        qs = qs.filter(user_id=user_id)
+
+    reaped_ids = list(qs.values_list("pk", flat=True))
+    if not reaped_ids:
+        return 0
+
+    n = Document.objects.filter(pk__in=reaped_ids).update(
+        status="error",
+        error_message=STALE_PROCESSING_REAP_MESSAGE,
+        progress_message="处理被中断",
+    )
+    logger.warning(
+        "Reaped %d orphaned 'processing' documents (ids=%s, user_id=%s)",
+        n,
+        reaped_ids,
+        user_id,
+    )
+    return n
 
 
 def _update_progress(document_id: int, progress: int, message: str) -> None:

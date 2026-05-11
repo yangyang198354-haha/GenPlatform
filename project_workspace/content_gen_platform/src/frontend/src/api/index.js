@@ -103,6 +103,7 @@ export const kbAPI = {
     }),
   search: (query) => api.get("/knowledge/documents/", { params: { search: query } }),
   rename: (id, name) => api.patch(`/knowledge/documents/${id}/`, { name }),
+  retry: (id) => api.post(`/knowledge/documents/${id}/retry/`),
   delete: (id) => api.delete(`/knowledge/documents/${id}/`),
 };
 
