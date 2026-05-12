@@ -15,6 +15,14 @@ EnvironmentFile=/opt/genplatform/.env
 Environment=HF_ENDPOINT=https://hf-mirror.com
 Environment=HF_HUB_DISABLE_PROGRESS_BARS=1
 
+# HF_HOME 必须显式指定一个 genplatform 用户可写的路径。
+# 不设的话 HuggingFace 默认走 $HOME/.cache/huggingface/，而 genplatform 用户
+# 在 setup_system.sh 中用 --no-create-home 创建，/home/genplatform 不存在；
+# 加之 / 与 /home 不可由非 root 用户 mkdir，会触发 PermissionError 并让首次
+# 文档处理任务失败。/opt/genplatform 是 deploy_physical.sh 已 chown 给本用户
+# 的部署根目录，存放缓存安全且权限稳定。
+Environment=HF_HOME=/opt/genplatform/.cache/huggingface
+
 ExecStart=/opt/genplatform/venv/bin/celery \
     -A config worker \
     -l info \
