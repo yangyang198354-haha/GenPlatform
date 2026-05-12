@@ -47,11 +47,29 @@ export function ensureTokenRefreshed(auth) {
   return _refreshPromise;
 }
 
+// Endpoints that must NEVER trigger the refresh-and-retry flow, even if they
+// return 401. Trying to refresh inside the refresh call itself causes a
+// self-awaiting Promise deadlock (`_refreshPromise` ends up awaiting itself),
+// which freezes the page: the original request never resolves, logout/redirect
+// never fires, and the user is stuck staring at console errors.
+// Login is included for symmetry — a 401 there means bad credentials, not an
+// expired session, so refresh would be pointless and could mask the real error.
+const AUTH_BYPASS_PATHS = ["/auth/token/refresh/", "/auth/login/"];
+
+function isAuthBypassRequest(config) {
+  const url = config?.url || "";
+  return AUTH_BYPASS_PATHS.some((p) => url.includes(p));
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (
+      error.response?.status === 401 &&
+      !originalRequest._retry &&
+      !isAuthBypassRequest(originalRequest)
+    ) {
       originalRequest._retry = true;
       const auth = useAuthStore();
 
