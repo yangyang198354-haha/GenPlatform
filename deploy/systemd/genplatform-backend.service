@@ -11,6 +11,13 @@ Group=genplatform
 WorkingDirectory=/opt/genplatform/app/project_workspace/content_gen_platform/src/backend
 EnvironmentFile=/opt/genplatform/.env
 
+# HF_HOME 显式指向部署用户可写的路径，避免 sentence_transformers 默认走
+# $HOME/.cache/huggingface/ → /home/genplatform/.cache/... 触发 PermissionError
+# （genplatform 用户用 --no-create-home 创建，/home/genplatform 不存在且不可创建）。
+# 后端在 apps.knowledge_base.apps.ready() 启动时预热模型 + /search 也会用，
+# 必须与 celery worker 用同一份 cache 才能复用已下载的模型。
+Environment=HF_HOME=/opt/genplatform/.cache/huggingface
+
 # 使用 Gunicorn 的 UvicornWorker 支持 ASGI（Django Channels / SSE）
 # workers=2: 内存有限的服务器（4G）实测 4 workers 全部 OOM Killed
 # max-requests + jitter: 每个 worker 处理一定请求后自动重启，释放可能泄漏的内存
@@ -46,7 +53,7 @@ OOMScoreAdjust=-500
 PrivateTmp=true
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/opt/genplatform/logs /opt/genplatform/media /opt/genplatform/staticfiles
+ReadWritePaths=/opt/genplatform/logs /opt/genplatform/media /opt/genplatform/staticfiles /opt/genplatform/.cache
 
 [Install]
 WantedBy=multi-user.target

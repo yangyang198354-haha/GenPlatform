@@ -359,8 +359,17 @@ log_info "[OK] collectstatic 完成"
 # ── 步骤 9: 嵌入模型预热 ──────────────────────────────────────────────────────
 log_info "--- 步骤 9/12: 预热嵌入模型（可失败，Worker 启动时会重试）---"
 EMBEDDING_MODEL="${EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}"
+
+# HF_HOME 必须与 systemd 服务文件保持一致（/opt/genplatform/.cache/huggingface），
+# 否则预热在 /root/.cache/huggingface 下载，celery 用 genplatform 身份起来读不到，
+# 会重新下载——而 /home/genplatform 不存在导致 PermissionError，任务永久 failed。
+HF_CACHE_DIR="$APP_DIR/.cache/huggingface"
+mkdir -p "$HF_CACHE_DIR"
+chown -R genplatform:genplatform "$APP_DIR/.cache"
+
 set +e
-HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}" \
+HF_HOME="$HF_CACHE_DIR" \
+    HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}" \
     HF_HUB_DISABLE_PROGRESS_BARS=1 \
     "$VENV_DIR/bin/python" -c \
     "from sentence_transformers import SentenceTransformer; SentenceTransformer('$EMBEDDING_MODEL'); print('模型预热完成')" \
@@ -368,12 +377,12 @@ HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}" \
 PREWARM_EXIT=$?
 set -e
 if (( PREWARM_EXIT == 0 )); then
-    log_info "[OK] 嵌入模型预热成功"
+    log_info "[OK] 嵌入模型预热成功（缓存路径: $HF_CACHE_DIR）"
 else
     log_warn "[WARN] 嵌入模型预热失败（可能网络原因），Worker 首次启动时会重试下载"
 fi
 
-# 确保 app 目录所有者正确（文件可能由 root 创建）
+# 确保 app 目录所有者正确（文件可能由 root 创建，包括上面写入的 HF 缓存）
 chown -R genplatform:genplatform "$APP_DIR" 2>/dev/null || true
 
 # ── 步骤 10: 启动服务 ─────────────────────────────────────────────────────────
