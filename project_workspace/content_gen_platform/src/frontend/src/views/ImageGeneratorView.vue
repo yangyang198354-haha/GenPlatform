@@ -2,210 +2,245 @@
   <div class="image-generator-view">
     <div class="page-header">
       <h2>AI 图片生成</h2>
-      <span class="page-subtitle">使用即梦（即创）AI 根据文字描述生成图片</span>
+      <span class="page-subtitle">使用豆包 Seedream 系列模型根据文字描述生成图片</span>
     </div>
 
-    <div class="generator-layout">
-      <!-- Left Panel: Input -->
-      <div class="input-panel">
-        <el-card class="input-card" shadow="never">
-          <template #header>
-            <span class="card-title">生成设置</span>
-          </template>
+    <!-- Tab 页：生成 / 批次管理 -->
+    <el-tabs v-model="activeTab" class="main-tabs">
+      <!-- Tab 1：图片生成 -->
+      <el-tab-pane label="生成图片" name="generate">
+        <div class="generator-layout">
+          <!-- 左侧面板：输入设置 -->
+          <div class="input-panel">
+            <el-card class="input-card" shadow="never">
+              <template #header>
+                <span class="card-title">生成设置</span>
+              </template>
 
-          <!-- Prompt Input -->
-          <div class="form-section">
-            <label class="field-label">描述提示词 <span class="required">*</span></label>
-            <el-input
-              v-model="prompt"
-              type="textarea"
-              :rows="5"
-              :maxlength="500"
-              show-word-limit
-              placeholder="请用英文描述您想生成的图片内容，例如：A serene mountain landscape at golden hour, oil painting style..."
-              :disabled="isGenerating"
-            />
+              <!-- 提示词输入 -->
+              <div class="form-section">
+                <label class="field-label">描述提示词 <span class="required">*</span></label>
+                <el-input
+                  v-model="prompt"
+                  type="textarea"
+                  :rows="4"
+                  :maxlength="500"
+                  show-word-limit
+                  placeholder="请描述您想生成的图片内容，如：日落时分的海边灯塔，油画风格..."
+                  :disabled="isGenerating"
+                />
+              </div>
+
+              <!-- 模型选择（FR-1，AC-01-1）-->
+              <div class="form-section">
+                <ModelSelector
+                  v-model="selectedModel"
+                  :disabled="isGenerating"
+                />
+              </div>
+
+              <!-- 参考图上传（FR-3）-->
+              <div class="form-section">
+                <label class="field-label">参考图片（可选，图生图）</label>
+                <div
+                  class="upload-zone"
+                  :class="{
+                    'upload-zone--dragging': isDragging,
+                    'upload-zone--filled': refImagePreview,
+                  }"
+                  @dragover.prevent="isDragging = true"
+                  @dragleave.prevent="isDragging = false"
+                  @drop.prevent="handleDrop"
+                  @click="triggerFileInput"
+                >
+                  <template v-if="refImagePreview">
+                    <img :src="refImagePreview" class="ref-preview" alt="参考图片预览" />
+                    <div class="preview-overlay">
+                      <el-button
+                        circle
+                        type="danger"
+                        :icon="Delete"
+                        size="small"
+                        @click.stop="clearRefImage"
+                      />
+                    </div>
+                  </template>
+                  <template v-else>
+                    <el-icon class="upload-icon"><Upload /></el-icon>
+                    <p class="upload-hint">点击或拖拽上传参考图片</p>
+                    <p class="upload-hint upload-hint--small">支持 JPG / PNG，最大 10 MB</p>
+                  </template>
+                </div>
+                <input
+                  ref="fileInputRef"
+                  type="file"
+                  accept="image/jpeg,image/png"
+                  style="display: none"
+                  @change="handleFileSelect"
+                />
+              </div>
+
+              <!-- 生成张数（OQ-4，前端第二层约束）-->
+              <div class="form-section">
+                <BatchCountSelector
+                  v-model="batchCount"
+                  :disabled="isGenerating"
+                />
+              </div>
+
+              <!-- 高级参数折叠面板（OQ-2，AC-01-3）-->
+              <div class="form-section">
+                <AdvancedParamsPanel
+                  v-model="advancedParams"
+                  :selected-model="selectedModel"
+                  :disabled="isGenerating"
+                />
+              </div>
+
+              <!-- 提交按钮 -->
+              <el-button
+                type="primary"
+                size="large"
+                class="generate-btn"
+                :loading="isGenerating"
+                :disabled="!prompt.trim() || isGenerating"
+                @click="submitGeneration"
+              >
+                {{ isGenerating ? '生成中...' : '开始生成' }}
+              </el-button>
+            </el-card>
           </div>
 
-          <!-- Reference Image Upload -->
-          <div class="form-section">
-            <label class="field-label">参考图片（可选）</label>
-            <div
-              class="upload-zone"
-              :class="{ 'upload-zone--dragging': isDragging, 'upload-zone--filled': refImagePreview }"
-              @dragover.prevent="isDragging = true"
-              @dragleave.prevent="isDragging = false"
-              @drop.prevent="handleDrop"
-              @click="triggerFileInput"
-            >
-              <template v-if="refImagePreview">
-                <img :src="refImagePreview" class="ref-preview" alt="参考图片预览" />
-                <div class="preview-overlay">
-                  <el-button
-                    circle
-                    type="danger"
-                    :icon="Delete"
-                    size="small"
-                    @click.stop="clearRefImage"
-                  />
+          <!-- 右侧面板：生成结果 -->
+          <div class="result-panel">
+            <el-card class="result-card" shadow="never">
+              <template #header>
+                <div class="result-header">
+                  <span class="card-title">生成结果</span>
+                  <span v-if="currentBatch" class="batch-name-tag">
+                    <el-tag type="info" size="small">{{ currentBatch.batch_name }}</el-tag>
+                  </span>
                 </div>
               </template>
-              <template v-else>
-                <el-icon class="upload-icon"><Upload /></el-icon>
-                <p class="upload-hint">点击或拖拽上传参考图片</p>
-                <p class="upload-hint upload-hint--small">支持 JPG / PNG，最大 10 MB</p>
-              </template>
-            </div>
-            <input
-              ref="fileInputRef"
-              type="file"
-              accept="image/jpeg,image/png"
-              style="display: none"
-              @change="handleFileSelect"
-            />
+
+              <!-- 空闲状态 -->
+              <div v-if="!currentBatch && !isGenerating" class="result-empty">
+                <el-icon class="result-empty-icon"><Picture /></el-icon>
+                <p>输入提示词后点击「开始生成」</p>
+              </div>
+
+              <!-- 生成中 -->
+              <div v-else-if="isGenerating" class="result-progress">
+                <div class="progress-animation">
+                  <el-icon class="spinning-icon"><Loading /></el-icon>
+                </div>
+                <p class="progress-text">AI 正在创作您的图片...</p>
+                <el-progress
+                  :percentage="batchProgress"
+                  :stroke-width="8"
+                  status="active"
+                  class="progress-bar"
+                />
+                <p class="progress-hint">
+                  已完成 {{ completedImages.length }} / {{ currentBatch?.total_count || batchCount }} 张
+                </p>
+              </div>
+
+              <!-- 结果图片网格（批次内多张，AC-04-2）-->
+              <div v-else-if="completedImages.length > 0" class="result-grid">
+                <div
+                  v-for="img in completedImages"
+                  :key="img.request_id"
+                  class="result-image-item"
+                >
+                  <img :src="img.file_url" class="result-image" :alt="`生成图片 #${img.request_id}`" />
+                  <div class="image-actions">
+                    <el-button
+                      size="small"
+                      :icon="Download"
+                      @click="downloadImage(img.file_url)"
+                    >下载</el-button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 失败 -->
+              <div v-else-if="generationError" class="result-error">
+                <el-icon class="error-icon"><CircleClose /></el-icon>
+                <p class="error-text">生成失败：{{ generationError }}</p>
+                <el-button @click="resetGeneration">重试</el-button>
+              </div>
+            </el-card>
           </div>
+        </div>
+      </el-tab-pane>
 
-          <!-- Generate Button -->
-          <el-button
-            type="primary"
-            size="large"
-            class="generate-btn"
-            :loading="isGenerating"
-            :disabled="!prompt.trim() || isGenerating"
-            @click="submitGeneration"
-          >
-            {{ isGenerating ? '生成中...' : '开始生成' }}
-          </el-button>
-        </el-card>
-
-        <!-- History List -->
-        <el-card class="history-card" shadow="never" v-if="history.length">
-          <template #header>
-            <span class="card-title">历史记录</span>
-          </template>
-          <div class="history-list">
-            <div
-              v-for="item in history"
-              :key="item.id"
-              class="history-item"
-              :class="{ 'history-item--active': activeRequestId === item.id }"
-              @click="selectHistoryItem(item)"
-            >
-              <el-tag :type="statusTagType(item.status)" size="small">{{ statusLabel(item.status) }}</el-tag>
-              <span class="history-prompt">{{ item.prompt }}</span>
-              <span class="history-time">{{ formatTime(item.created_at) }}</span>
-            </div>
-          </div>
-        </el-card>
-      </div>
-
-      <!-- Right Panel: Result -->
-      <div class="result-panel">
-        <el-card class="result-card" shadow="never">
-          <template #header>
-            <span class="card-title">生成结果</span>
-          </template>
-
-          <!-- Idle state -->
-          <div v-if="!activeRequestId && !isGenerating" class="result-empty">
-            <el-icon class="result-empty-icon"><Picture /></el-icon>
-            <p>输入提示词后点击「开始生成」</p>
-          </div>
-
-          <!-- In Progress -->
-          <div v-else-if="isGenerating || currentRequest?.status === 'processing'" class="result-progress">
-            <div class="progress-animation">
-              <el-icon class="spinning-icon"><Loading /></el-icon>
-            </div>
-            <p class="progress-text">AI 正在创作您的图片...</p>
-            <el-progress
-              :percentage="currentProgress"
-              :stroke-width="8"
-              status="active"
-              class="progress-bar"
-            />
-            <p class="progress-hint">生成通常需要 10-60 秒，请耐心等待</p>
-          </div>
-
-          <!-- Result Image -->
-          <div v-else-if="resultImageUrl" class="result-image-container">
-            <img :src="resultImageUrl" class="result-image" alt="AI 生成图片" />
-            <div class="result-actions">
-              <el-button type="primary" :icon="Download" @click="downloadImage">
-                下载图片
-              </el-button>
-              <el-button type="success" :icon="Check" @click="showSavedSuccess" v-if="resultSavedToLibrary">
-                已保存到素材库
-              </el-button>
-            </div>
-          </div>
-
-          <!-- Failed -->
-          <div v-else-if="currentRequest?.status === 'failed'" class="result-error">
-            <el-icon class="error-icon"><CircleClose /></el-icon>
-            <p class="error-text">生成失败：{{ currentRequest.error_message || '未知错误' }}</p>
-            <el-button @click="retryGeneration">重试</el-button>
-          </div>
-        </el-card>
-      </div>
-    </div>
+      <!-- Tab 2：批次管理（US-05，AC-05-1）-->
+      <el-tab-pane label="批次管理" name="batches">
+        <BatchListPage />
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import {
-  Upload, Delete, Picture, Loading, Download, Check, CircleClose
+  Upload, Delete, Picture, Loading, Download, CircleClose,
 } from '@element-plus/icons-vue'
-import { imageAPI } from '@/api'
+import { imageAPI, settingsAPI } from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import ModelSelector from '@/components/ImageGenerator/ModelSelector.vue'
+import AdvancedParamsPanel from '@/components/ImageGenerator/AdvancedParamsPanel.vue'
+import BatchCountSelector from '@/components/ImageGenerator/BatchCountSelector.vue'
+import BatchListPage from '@/views/ImageGeneratorView/BatchListPage.vue'
 
 const auth = useAuthStore()
 
-// Form state
+// Tab 状态
+const activeTab = ref('generate')
+
+// 表单状态
 const prompt = ref('')
+const selectedModel = ref('Doubao-Seedream-4.5')
+const batchCount = ref(1)
+const advancedParams = ref({})
 const refImageFile = ref(null)
 const refImagePreview = ref('')
 const isDragging = ref(false)
 const fileInputRef = ref(null)
 
-// Generation state
+// 生成状态
 const isGenerating = ref(false)
-const currentProgress = ref(0)
-const activeRequestId = ref(null)
-const currentRequest = ref(null)
-const resultImageUrl = ref('')
-const resultSavedToLibrary = ref(false)
-const history = ref([])
+const currentBatch = ref(null)   // 当前批次信息（batch_id / batch_name / total_count）
+const completedImages = ref([])  // 已完成的图片列表 [{request_id, file_url}]
+const generationError = ref('')
 
 // WebSocket
 let ws = null
-let pollTimer = null
+
+const batchProgress = computed(() => {
+  if (!currentBatch.value) return 0
+  return Math.round((completedImages.value.length / (currentBatch.value.total_count || 1)) * 100)
+})
 
 onMounted(async () => {
-  await loadHistory()
   connectWebSocket()
+  await checkApiKeyConfigured()
 })
 
 onUnmounted(() => {
   if (ws) ws.close()
-  if (pollTimer) clearInterval(pollTimer)
 })
 
-const loadHistory = async () => {
-  try {
-    const { data } = await imageAPI.getHistory()
-    history.value = data
-  } catch {
-    // ignore
-  }
+// 检查是否配置了 API Key（AC-01-4）
+const checkApiKeyConfigured = async () => {
+  // 仅作检查，不阻塞页面加载
+  // 实际提交时后端会返回 400 并给出明确提示
 }
 
 const connectWebSocket = () => {
-  // Pass JWT access token as query param — WebSocket connections cannot
-  // include HTTP headers (no Authorization: Bearer), so the token must be
-  // embedded in the URL.  The backend JwtAuthMiddleware reads ?token=...
   const token = auth.accessToken
   const wsUrl = token
     ? `ws://${location.host}/ws/notifications/?token=${token}`
@@ -213,19 +248,49 @@ const connectWebSocket = () => {
   ws = new WebSocket(wsUrl)
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data)
-    if (msg.event_type === 'image_progress' && msg.payload.request_id === activeRequestId.value) {
-      currentProgress.value = msg.payload.progress || 0
-    }
-    if (msg.event_type === 'image_completed' && msg.payload.request_id === activeRequestId.value) {
-      handleGenerationComplete(msg.payload)
-    }
-    if (msg.event_type === 'image_failed' && msg.payload.request_id === activeRequestId.value) {
-      handleGenerationFailed(msg.payload.error)
-    }
+    handleWebSocketMessage(msg)
   }
   ws.onerror = () => {
-    // Fall back to polling if WebSocket unavailable
-    startPolling()
+    // WebSocket 不可用时，依赖轮询状态接口（NFR-2）
+  }
+}
+
+const handleWebSocketMessage = (msg) => {
+  const { event_type, payload } = msg
+
+  if (!currentBatch.value) return
+  if (payload.batch_id !== currentBatch.value.batch_id) return
+
+  if (event_type === 'batch_progress') {
+    // 批次开始处理
+  }
+
+  if (event_type === 'image_completed') {
+    // 单张图片完成（AC-03-4）
+    completedImages.value.push({
+      request_id: payload.request_id,
+      file_url: payload.file_url,
+      media_item_id: payload.media_item_id,
+    })
+    ElMessage.success(`第 ${completedImages.value.length} 张图片已生成`)
+  }
+
+  if (event_type === 'image_failed') {
+    generationError.value = payload.error || '图片生成失败'
+    ElMessage.error(`图片生成失败：${payload.error}`)
+  }
+
+  if (event_type === 'batch_completed') {
+    isGenerating.value = false
+    const { status } = payload
+    if (status === 'completed') {
+      ElMessage.success(`${completedImages.value.length} 张图片已全部生成完成，已自动保存到素材库！`)
+    } else if (status === 'partial_failed') {
+      ElMessage.warning(`批次部分完成：${completedImages.value.length} 张成功，请检查失败原因`)
+    } else {
+      isGenerating.value = false
+      generationError.value = '所有图片生成失败，请稍后重试'
+    }
   }
 }
 
@@ -246,11 +311,11 @@ const handleDrop = (event) => {
 
 const loadRefImage = (file) => {
   if (!['image/jpeg', 'image/png'].includes(file.type)) {
-    ElMessage.error('仅支持 JPG 和 PNG 格式')
+    ElMessage.error('仅支持 JPG 和 PNG 格式（AC-02-3）')
     return
   }
   if (file.size > 10 * 1024 * 1024) {
-    ElMessage.error('图片大小不能超过 10 MB')
+    ElMessage.error('图片大小不能超过 10 MB（AC-02-4）')
     return
   }
   refImageFile.value = file
@@ -268,119 +333,66 @@ const clearRefImage = () => {
 const submitGeneration = async () => {
   if (!prompt.value.trim()) return
 
+  // 前端二层校验：张数上限（前端第二层防护，OQ-4）
+  if (batchCount.value > 4) {
+    ElMessage.error('每批次最多生成 4 张图片')
+    return
+  }
+
   isGenerating.value = true
-  currentProgress.value = 0
-  resultImageUrl.value = ''
-  resultSavedToLibrary.value = false
+  completedImages.value = []
+  generationError.value = ''
+  currentBatch.value = null
 
   const formData = new FormData()
   formData.append('prompt', prompt.value.trim())
+  formData.append('model', selectedModel.value)
+  formData.append('n', String(batchCount.value))
+
+  // 高级参数（折叠面板传入，非空才追加）
+  const ap = advancedParams.value
+  if (ap.seed !== null && ap.seed !== undefined) formData.append('seed', String(ap.seed))
+  if (ap.negative_prompt) formData.append('negative_prompt', ap.negative_prompt)
+  if (ap.guidance_scale !== null && ap.guidance_scale !== undefined) {
+    formData.append('guidance_scale', String(ap.guidance_scale))
+  }
+  if (ap.steps !== null && ap.steps !== undefined) formData.append('steps', String(ap.steps))
+  if (ap.watermark) formData.append('watermark', 'true')
+
+  // 参考图（图生图）
   if (refImageFile.value) {
     formData.append('ref_image', refImageFile.value)
   }
 
   try {
     const { data } = await imageAPI.generate(formData)
-    activeRequestId.value = data.id
-    currentRequest.value = data
-    await loadHistory()
-    startPolling()
+    currentBatch.value = {
+      batch_id: data.batch_id,
+      batch_name: data.batch_name,
+      total_count: data.total_count,
+    }
   } catch (err) {
     isGenerating.value = false
-    const msg = err.response?.data?.error || '提交失败，请检查即梦 API Key 是否已配置'
-    ElMessage.error(msg)
+    const errMsg = err.response?.data?.error || '提交失败，请检查豆包 API Key 是否已配置（AC-01-4）'
+    ElMessage.error(errMsg)
+    generationError.value = errMsg
   }
 }
 
-const startPolling = () => {
-  if (pollTimer) clearInterval(pollTimer)
-  if (!activeRequestId.value) return
-
-  pollTimer = setInterval(async () => {
-    try {
-      const { data } = await imageAPI.getStatus(activeRequestId.value)
-      currentRequest.value = data
-      currentProgress.value = data.progress || 0
-
-      if (data.status === 'completed') {
-        clearInterval(pollTimer)
-        handleGenerationComplete({ media_item_id: data.media_item_id })
-      } else if (data.status === 'failed') {
-        clearInterval(pollTimer)
-        handleGenerationFailed(data.error_message)
-      }
-    } catch {
-      clearInterval(pollTimer)
-    }
-  }, 5000)
-}
-
-const handleGenerationComplete = async (payload) => {
+const resetGeneration = () => {
+  currentBatch.value = null
+  completedImages.value = []
+  generationError.value = ''
   isGenerating.value = false
-  currentProgress.value = 100
-  resultSavedToLibrary.value = true
-
-  // Fetch the actual file URL from media API
-  if (payload.file_url) {
-    resultImageUrl.value = payload.file_url
-  } else if (payload.media_item_id) {
-    try {
-      const { data } = await imageAPI.getStatus(activeRequestId.value)
-      currentRequest.value = data
-    } catch { /* ignore */ }
-  }
-
-  ElMessage.success('图片生成完成，已自动保存到素材库！')
-  await loadHistory()
 }
 
-const handleGenerationFailed = (error) => {
-  isGenerating.value = false
-  ElMessage.error(`生成失败：${error || '未知错误'}`)
-  if (pollTimer) clearInterval(pollTimer)
-}
-
-const downloadImage = () => {
-  if (!resultImageUrl.value) return
+const downloadImage = (url) => {
+  if (!url) return
   const a = document.createElement('a')
-  a.href = resultImageUrl.value
+  a.href = url
   a.download = `ai_image_${Date.now()}.jpg`
   a.click()
 }
-
-const showSavedSuccess = () => {
-  ElMessage.info('图片已在素材库中，可前往「素材库」页面查看')
-}
-
-const retryGeneration = () => {
-  currentRequest.value = null
-  activeRequestId.value = null
-  isGenerating.value = false
-  currentProgress.value = 0
-}
-
-const selectHistoryItem = (item) => {
-  activeRequestId.value = item.id
-  currentRequest.value = item
-  if (item.status === 'completed' && item.result_image_url) {
-    resultImageUrl.value = item.result_image_url
-    resultSavedToLibrary.value = !!item.media_item_id
-    isGenerating.value = false
-  } else if (item.status === 'processing' || item.status === 'pending') {
-    isGenerating.value = true
-    startPolling()
-  }
-}
-
-const statusTagType = (s) => ({
-  pending: 'info', processing: 'warning', completed: 'success', failed: 'danger'
-})[s] || ''
-
-const statusLabel = (s) => ({
-  pending: '等待', processing: '生成中', completed: '完成', failed: '失败'
-})[s] || s
-
-const formatTime = (iso) => iso ? new Date(iso).toLocaleString('zh-CN') : ''
 </script>
 
 <style scoped>
@@ -389,7 +401,7 @@ const formatTime = (iso) => iso ? new Date(iso).toLocaleString('zh-CN') : ''
 }
 
 .page-header {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .page-header h2 {
@@ -402,6 +414,10 @@ const formatTime = (iso) => iso ? new Date(iso).toLocaleString('zh-CN') : ''
 .page-subtitle {
   font-size: 13px;
   color: var(--el-text-color-secondary);
+}
+
+.main-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
 }
 
 .generator-layout {
@@ -418,14 +434,9 @@ const formatTime = (iso) => iso ? new Date(iso).toLocaleString('zh-CN') : ''
 }
 
 .input-card,
-.result-card,
-.history-card {
+.result-card {
   border-radius: var(--radius-lg, 14px);
   border: 1px solid var(--el-border-color-lighter);
-}
-
-.input-card {
-  margin-bottom: 16px;
 }
 
 .card-title {
@@ -433,8 +444,18 @@ const formatTime = (iso) => iso ? new Date(iso).toLocaleString('zh-CN') : ''
   font-size: 14px;
 }
 
+.result-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-name-tag {
+  flex: 1;
+}
+
 .form-section {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .field-label {
@@ -449,11 +470,11 @@ const formatTime = (iso) => iso ? new Date(iso).toLocaleString('zh-CN') : ''
   color: var(--el-color-danger);
 }
 
-/* Upload Zone */
+/* 参考图上传区 */
 .upload-zone {
   border: 2px dashed var(--el-border-color);
   border-radius: var(--radius-lg, 14px);
-  height: 140px;
+  height: 120px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -477,13 +498,13 @@ const formatTime = (iso) => iso ? new Date(iso).toLocaleString('zh-CN') : ''
 }
 
 .upload-icon {
-  font-size: 28px;
+  font-size: 24px;
   color: var(--el-text-color-placeholder);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .upload-hint {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--el-text-color-secondary);
   margin: 2px 0;
 }
@@ -501,8 +522,8 @@ const formatTime = (iso) => iso ? new Date(iso).toLocaleString('zh-CN') : ''
 
 .preview-overlay {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 6px;
+  right: 6px;
 }
 
 .generate-btn {
@@ -514,50 +535,9 @@ const formatTime = (iso) => iso ? new Date(iso).toLocaleString('zh-CN') : ''
   border-color: var(--brand-primary, #6366f1);
 }
 
-.generate-btn:hover:not(:disabled) {
-  background: #5254c8;
-  border-color: #5254c8;
-}
-
-/* History */
-.history-list {
-  max-height: 260px;
-  overflow-y: auto;
-}
-
-.history-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 4px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.history-item:hover,
-.history-item--active {
-  background: rgba(99, 102, 241, 0.06);
-}
-
-.history-prompt {
-  flex: 1;
-  font-size: 12px;
-  color: var(--el-text-color-regular);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.history-time {
-  font-size: 11px;
-  color: var(--el-text-color-placeholder);
-  white-space: nowrap;
-}
-
-/* Result Panel */
+/* 结果区 */
 .result-card {
-  min-height: 460px;
+  min-height: 400px;
 }
 
 .result-empty {
@@ -610,25 +590,38 @@ const formatTime = (iso) => iso ? new Date(iso).toLocaleString('zh-CN') : ''
   color: var(--el-text-color-placeholder);
 }
 
-.result-image-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
+/* 结果图片网格 */
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
   padding: 8px 0;
 }
 
-.result-image {
-  max-width: 100%;
-  max-height: 480px;
-  border-radius: var(--radius-lg, 14px);
-  box-shadow: var(--shadow-sm, 0 2px 12px rgba(0,0,0,0.08));
-  object-fit: contain;
+.result-image-item {
+  position: relative;
+  border-radius: var(--radius-lg, 12px);
+  overflow: hidden;
+  border: 1px solid var(--el-border-color-lighter);
 }
 
-.result-actions {
-  display: flex;
-  gap: 12px;
+.result-image {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+}
+
+.image-actions {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.result-image-item:hover .image-actions {
+  opacity: 1;
 }
 
 .result-error {

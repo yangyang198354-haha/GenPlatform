@@ -10,7 +10,7 @@ from apps.content.models import Content
 from apps.publisher.models import PlatformAccount, PublishTask
 from apps.video_generator.models import VideoProject, Scene
 from apps.media_library.models import MediaItem
-from apps.image_generator.models import ImageGenerationRequest
+from apps.image_generator.models import ImageBatch, ImageGenerationRequest
 
 User = get_user_model()
 

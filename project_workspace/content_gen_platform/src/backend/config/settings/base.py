@@ -202,6 +202,17 @@ USER_STORAGE_QUOTA_BYTES = 2 * 1024 ** 3    # 2 GB
 # ── Encryption ────────────────────────────────────────────────────────────────
 ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY", "")  # 32-byte base64 key; set in production
 
+# ── 豆包 Ark 图片生成配置（NFR-3，ADR-06）──────────────────────────────────────
+# ARK_API_KEY 不在此处硬编码，必须通过 settings_vault 存储（AES-256-GCM 加密）
+# 以下为运行时默认值（不含任何密钥），覆盖后在 Celery task 中通过 UserServiceConfig 获取
+DOUBAO_ARK_BASE_URL = os.environ.get(
+    "ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"
+)
+# 单批次并发模式开关（ADR-03，降级方案开关）
+# "single_request"：单次 Ark 请求返回 n 张（优先方案）
+# "multi_request"：串行多次 Ark 请求（降级方案，若 Ark 不支持 n>1 参数时使用）
+DOUBAO_BATCH_MODE = os.environ.get("DOUBAO_BATCH_MODE", "single_request")
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 LOGGING = {
     "version": 1,

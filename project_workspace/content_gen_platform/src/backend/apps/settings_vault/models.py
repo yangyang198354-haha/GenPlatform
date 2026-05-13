@@ -7,6 +7,8 @@ class UserServiceConfig(models.Model):
         ("llm_deepseek", "DeepSeek LLM"),
         ("llm_volcano", "火山引擎（豆包）"),
         ("jimeng", "即梦视频/图片生成"),
+        # 豆包 Seedream 图片生成（Ark Bearer Token，ADR-06）
+        ("doubao_image", "豆包图片生成"),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="service_configs")

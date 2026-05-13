@@ -1,4 +1,14 @@
-"""Jimeng (即梦) API client for AI image generation via CVProcess action."""
+"""
+[已停用] 即梦（Jimeng）图片生成 API 客户端。
+
+停用原因：豆包 Seedream 迁移（2026-05-13）已完全替换即梦图片生成调用。
+本文件保留仅供历史追溯，不再被任何代码路径调用（ADR-02，OQ-1）。
+
+若需回滚至即梦，请将 apps/image_generator/tasks.py 中的
+DoubaoImageClient 相关 import 替换回本文件的 JimengImageClient。
+
+video_generator/jimeng_client.py（视频生成）不受影响，继续使用。
+"""
 import base64
 import json
 import logging

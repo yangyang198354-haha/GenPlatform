@@ -177,14 +177,22 @@ export const settingsAPI = {
   list: () => api.get("/settings/services/"),
 };
 
-// ── Image Generator API ────────────────────────────────────────────────────
+// ── Image Generator API（豆包 Seedream 版本）──────────────────────────────
 export const imageAPI = {
+  // 提交批次生成请求（POST，FR-2/FR-3，含模型选择 / n / 高级参数）
   generate: (formData) =>
     api.post("/image/generate/", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     }),
+  // 单请求状态查询（降级轮询，NFR-2）
   getStatus: (id) => api.get(`/image/generate/${id}/status/`),
+  // 生成历史（兼容旧即梦数据，AC-06-1）
   getHistory: () => api.get("/image/history/"),
+  // 批次管理（新增，FR-5，US-05）
+  getBatches: (params) => api.get("/image/batches/", { params }),
+  getBatchDetail: (id) => api.get(`/image/batches/${id}/`),
+  renameBatch: (id, name) => api.patch(`/image/batches/${id}/`, { name }),
+  deleteBatch: (id) => api.delete(`/image/batches/${id}/`),
 };
 
 // ── Media Library API ──────────────────────────────────────────────────────
