@@ -19,12 +19,14 @@ file_header:
 | 字段 | 值 |
 |------|----|
 | PR 标题 | feat(image): 集成豆包 Seedream 3 个模型，移除即梦 API |
-| PR URL | [待 PR 创建后填写] |
+| PR URL | https://github.com/yangyang198354-haha/GenPlatform/pull/4 |
 | Feature 分支 | feature/doubao-image-migration |
 | 目标分支 | main |
-| Commit Hash | [待 `git push` 后填写] |
-| 推送时间 | 2026-05-13 |
+| Commit Hash | ed8f407 |
+| 提交规模 | 44 files changed, 8039 insertions(+), 588 deletions(-) |
+| 推送时间 | 2026-05-14 |
 | 本机操作人 | Yang Yang |
+| Pre-commit hook | PASS（101 passed + 2 skipped + 339 deselected） |
 
 ---
 
