@@ -523,6 +523,10 @@ const formatFileSize = (bytes) => {
 }
 
 /* Hover Overlay */
+/* v1.2.1 BUG-02 修复：overlay 本身不拦截点击（pointer-events: none），
+   仅 .hover-actions 内按钮响应点击（pointer-events: auto）。
+   这样 el-image 的原生 preview click 事件不被蒙层截断，Lightbox 正常弹出。
+   ADR-v1.2.1-02 选方案 A（2行CSS，最小改动）。 */
 .hover-overlay {
   position: absolute;
   inset: 0;
@@ -530,11 +534,13 @@ const formatFileSize = (bytes) => {
   display: flex;
   align-items: center;
   justify-content: center;
+  pointer-events: none;   /* 关键修复：overlay 蒙层不拦截点击事件 */
 }
 
 .hover-actions {
   display: flex;
   gap: 10px;
+  pointer-events: auto;   /* 按钮区恢复点击事件 */
 }
 
 .fade-enter-active,
