@@ -33,7 +33,7 @@ class TestSubmitSerializerNBoundary:
     """
 
     def _valid_base(self):
-        return {"prompt": "测试提示词", "model": "Doubao-Seedream-4.5"}
+        return {"prompt": "测试提示词", "model": "doubao-seedream-4-5-251128"}
 
     # ── Canary 守卫测试（最重要，必须保留）────────────────────────────────────
 
@@ -86,23 +86,23 @@ class TestSubmitSerializerModelValidation:
     """模型枚举校验测试（AC-01-5）。"""
 
     def test_supported_model_50_lite_is_valid(self):
-        """Doubao-Seedream-5.0-lite 是支持的模型，应通过。"""
+        """doubao-seedream-5-0-260128 是支持的模型，应通过。"""
         s = ImageGenerationSubmitSerializer(data={
-            "prompt": "test", "model": "Doubao-Seedream-5.0-lite"
+            "prompt": "test", "model": "doubao-seedream-5-0-260128"
         })
         assert s.is_valid(), f"5.0-lite 应通过，错误：{s.errors}"
 
     def test_supported_model_45_is_valid(self):
-        """Doubao-Seedream-4.5 是支持的模型，应通过。"""
+        """doubao-seedream-4-5-251128 是支持的模型，应通过。"""
         s = ImageGenerationSubmitSerializer(data={
-            "prompt": "test", "model": "Doubao-Seedream-4.5"
+            "prompt": "test", "model": "doubao-seedream-4-5-251128"
         })
         assert s.is_valid(), f"4.5 应通过，错误：{s.errors}"
 
     def test_supported_model_40_is_valid(self):
-        """Doubao-Seedream-4.0 是支持的模型，应通过。"""
+        """doubao-seedream-4-0-250828 是支持的模型，应通过。"""
         s = ImageGenerationSubmitSerializer(data={
-            "prompt": "test", "model": "Doubao-Seedream-4.0"
+            "prompt": "test", "model": "doubao-seedream-4-0-250828"
         })
         assert s.is_valid(), f"4.0 应通过，错误：{s.errors}"
 
@@ -123,10 +123,10 @@ class TestSubmitSerializerModelValidation:
         assert "model" in s.errors
 
     def test_default_model_is_45(self):
-        """不传 model 时默认使用 Doubao-Seedream-4.5。"""
+        """不传 model 时默认使用 doubao-seedream-4-5-251128。"""
         s = ImageGenerationSubmitSerializer(data={"prompt": "test"})
         assert s.is_valid(), f"默认模型应通过，错误：{s.errors}"
-        assert s.validated_data["model"] == "Doubao-Seedream-4.5"
+        assert s.validated_data["model"] == "doubao-seedream-4-5-251128"
 
 
 class TestSubmitSerializerPromptValidation:
@@ -154,7 +154,7 @@ class TestSubmitSerializerAdvancedParams:
     """高级参数提取测试（ADR-05，OQ-2）。"""
 
     def _valid_base(self):
-        return {"prompt": "test", "model": "Doubao-Seedream-4.5"}
+        return {"prompt": "test", "model": "doubao-seedream-4-5-251128"}
 
     def test_get_advanced_params_extracts_seed(self):
         """传入 seed 时应在 advanced_params 中返回。"""

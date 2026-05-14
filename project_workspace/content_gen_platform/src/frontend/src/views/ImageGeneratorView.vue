@@ -210,7 +210,7 @@ const activeTab = ref('generate')
 
 // 表单状态
 const prompt = ref('')
-const selectedModel = ref('Doubao-Seedream-4.5')
+const selectedModel = ref('doubao-seedream-4-5-251128')
 const batchCount = ref(1)
 const advancedParams = ref({})
 const refImageFile = ref(null)

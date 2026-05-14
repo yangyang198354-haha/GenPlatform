@@ -45,7 +45,7 @@ class TestImageGenerationRequestModel:
         batch = ImageBatch.objects.create(
             user=user,
             name="0513-1430 测试",
-            model="Doubao-Seedream-4.5",
+            model="doubao-seedream-4-5-251128",
             prompt="测试",
             total_count=1,
             status="pending",
@@ -54,12 +54,12 @@ class TestImageGenerationRequestModel:
             user=user,
             batch=batch,
             prompt="测试",
-            model="Doubao-Seedream-4.5",
+            model="doubao-seedream-4-5-251128",
             provider="doubao",
             status="pending",
         )
         assert req.batch_id == batch.pk
-        assert req.model == "Doubao-Seedream-4.5"
+        assert req.model == "doubao-seedream-4-5-251128"
         assert req.provider == "doubao"
 
     def test_default_status_is_pending(self, user):
@@ -94,7 +94,7 @@ class TestImageBatchModel:
         batch = ImageBatch.objects.create(
             user=user,
             name="0513-1430 日落时分的海边...",
-            model="Doubao-Seedream-4.5",
+            model="doubao-seedream-4-5-251128",
             prompt="日落时分的海边灯塔",
             total_count=2,
             status="pending",
@@ -109,7 +109,7 @@ class TestImageBatchModel:
         """批次名称字段正确保存（OQ-3，AC-04-1）。"""
         name = "0513-1430 日落时分的海边..."
         batch = ImageBatch.objects.create(
-            user=user, name=name, model="Doubao-Seedream-4.5",
+            user=user, name=name, model="doubao-seedream-4-5-251128",
             prompt="test", total_count=1,
         )
         batch.refresh_from_db()
@@ -120,7 +120,7 @@ class TestImageBatchModel:
         valid_statuses = ["pending", "processing", "completed", "partial_failed", "failed"]
         for s in valid_statuses:
             batch = ImageBatch.objects.create(
-                user=user, name=f"批次-{s}", model="Doubao-Seedream-4.5",
+                user=user, name=f"批次-{s}", model="doubao-seedream-4-5-251128",
                 prompt="test", total_count=1, status=s,
             )
             assert batch.status == s
@@ -128,11 +128,11 @@ class TestImageBatchModel:
     def test_ordering_newest_first(self, user):
         """批次列表按时间倒序（Meta.ordering）。"""
         b1 = ImageBatch.objects.create(
-            user=user, name="b1", model="Doubao-Seedream-4.5",
+            user=user, name="b1", model="doubao-seedream-4-5-251128",
             prompt="test", total_count=1,
         )
         b2 = ImageBatch.objects.create(
-            user=user, name="b2", model="Doubao-Seedream-4.5",
+            user=user, name="b2", model="doubao-seedream-4-5-251128",
             prompt="test", total_count=1,
         )
         qs = list(ImageBatch.objects.filter(user=user).order_by("-pk"))
@@ -140,7 +140,7 @@ class TestImageBatchModel:
 
     def test_str_representation(self, user):
         batch = ImageBatch.objects.create(
-            user=user, name="测试批次", model="Doubao-Seedream-4.5",
+            user=user, name="测试批次", model="doubao-seedream-4-5-251128",
             prompt="test", total_count=1, status="pending",
         )
         s = str(batch)
@@ -150,7 +150,7 @@ class TestImageBatchModel:
     def test_total_count_1_is_valid(self, user):
         """total_count=1 在约束范围内，应正常创建（OQ-4）。"""
         batch = ImageBatch.objects.create(
-            user=user, name="test", model="Doubao-Seedream-4.5",
+            user=user, name="test", model="doubao-seedream-4-5-251128",
             prompt="test", total_count=1,
         )
         assert batch.total_count == 1
@@ -158,7 +158,7 @@ class TestImageBatchModel:
     def test_total_count_4_is_valid(self, user):
         """total_count=4 在约束范围内，应正常创建（OQ-4）。"""
         batch = ImageBatch.objects.create(
-            user=user, name="test", model="Doubao-Seedream-4.5",
+            user=user, name="test", model="doubao-seedream-4-5-251128",
             prompt="test", total_count=4,
         )
         assert batch.total_count == 4
@@ -168,7 +168,7 @@ class TestImageBatchModel:
         with pytest.raises((IntegrityError, Exception)):
             with transaction.atomic():
                 ImageBatch.objects.create(
-                    user=user, name="bad", model="Doubao-Seedream-4.5",
+                    user=user, name="bad", model="doubao-seedream-4-5-251128",
                     prompt="test", total_count=0,
                 )
 
@@ -177,19 +177,19 @@ class TestImageBatchModel:
         with pytest.raises((IntegrityError, Exception)):
             with transaction.atomic():
                 ImageBatch.objects.create(
-                    user=user, name="bad", model="Doubao-Seedream-4.5",
+                    user=user, name="bad", model="doubao-seedream-4-5-251128",
                     prompt="test", total_count=5,
                 )
 
     def test_cascade_delete_requests_on_batch_delete(self, user):
         """删除批次时，关联的 ImageGenerationRequest 通过 FK SET_NULL 处理（ADR-04）。"""
         batch = ImageBatch.objects.create(
-            user=user, name="test", model="Doubao-Seedream-4.5",
+            user=user, name="test", model="doubao-seedream-4-5-251128",
             prompt="test", total_count=1,
         )
         req = ImageGenerationRequest.objects.create(
             user=user, batch=batch, prompt="test",
-            model="Doubao-Seedream-4.5", provider="doubao",
+            model="doubao-seedream-4-5-251128", provider="doubao",
         )
         batch_pk = batch.pk
         req_pk = req.pk
@@ -204,7 +204,7 @@ class TestImageBatchModel:
     def test_is_img2img_default_false(self, user):
         """is_img2img 默认为 False（文生图场景）。"""
         batch = ImageBatch.objects.create(
-            user=user, name="test", model="Doubao-Seedream-4.5",
+            user=user, name="test", model="doubao-seedream-4-5-251128",
             prompt="test", total_count=1,
         )
         assert batch.is_img2img is False

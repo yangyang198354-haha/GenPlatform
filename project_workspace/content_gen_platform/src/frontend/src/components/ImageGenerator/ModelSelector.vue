@@ -1,6 +1,6 @@
 <template>
   <!-- 模型选择下拉框（FR-1，AC-01-1）
-       支持 Doubao-Seedream-5.0-lite / 4.5 / 4.0，默认 4.5
+       支持 doubao-seedream-5-0-260128 / 4.5 / 4.0，默认 4.5
        无即梦相关选项（OQ-1）
   -->
   <div class="model-selector">
@@ -35,17 +35,17 @@ import { ref, watch } from 'vue'
 // 支持的模型列表（与后端 ImageGenerationSubmitSerializer.SUPPORTED_MODELS 保持一致）
 const MODEL_OPTIONS = [
   {
-    value: 'Doubao-Seedream-5.0-lite',
+    value: 'doubao-seedream-5-0-260128',
     label: 'Seedream 5.0 Lite',
     desc: '速度优先，适合快速预览',
   },
   {
-    value: 'Doubao-Seedream-4.5',
+    value: 'doubao-seedream-4-5-251128',
     label: 'Seedream 4.5',
     desc: '质量与速度均衡（推荐）',
   },
   {
-    value: 'Doubao-Seedream-4.0',
+    value: 'doubao-seedream-4-0-250828',
     label: 'Seedream 4.0',
     desc: '标准版，适合精细调整',
   },
@@ -54,7 +54,7 @@ const MODEL_OPTIONS = [
 const props = defineProps({
   modelValue: {
     type: String,
-    default: 'Doubao-Seedream-4.5',
+    default: 'doubao-seedream-4-5-251128',
   },
   disabled: {
     type: Boolean,

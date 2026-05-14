@@ -60,7 +60,7 @@ class TestDoubaoImageClientSuccess:
         client = _make_client()
         result = client.generate_images(
             prompt="日落时分的海边灯塔",
-            model="Doubao-Seedream-4.5",
+            model="doubao-seedream-4-5-251128",
             n=1,
         )
 
@@ -83,7 +83,7 @@ class TestDoubaoImageClientSuccess:
         client = _make_client()
         result = client.generate_images(
             prompt="山水画",
-            model="Doubao-Seedream-4.5",
+            model="doubao-seedream-4-5-251128",
             n=4,
         )
 
@@ -102,7 +102,7 @@ class TestDoubaoImageClientSuccess:
         mock_http.post.return_value = mock_resp
 
         client = DoubaoImageClient(api_key="my-secret-key")
-        client.generate_images(prompt="test", model="Doubao-Seedream-4.5")
+        client.generate_images(prompt="test", model="doubao-seedream-4-5-251128")
 
         call_kwargs = mock_http.post.call_args[1]
         headers = call_kwargs.get("headers", {})
@@ -126,38 +126,38 @@ class TestDoubaoImageClientModelVersions:
 
     @patch("apps.image_generator.doubao_image_client.httpx.Client")
     def test_generate_with_50_lite_model(self, mock_http_class):
-        """Doubao-Seedream-5.0-lite 模型生成成功（FR-1）。"""
+        """doubao-seedream-5-0-260128 模型生成成功（FR-1）。"""
         mock_http = self._setup_mock(mock_http_class)
         client = _make_client()
         result = client.generate_images(
-            prompt="测试 5.0-lite", model="Doubao-Seedream-5.0-lite", n=1
+            prompt="测试 5.0-lite", model="doubao-seedream-5-0-260128", n=1
         )
         assert len(result.image_urls) == 1
         # 验证请求体 model 字段正确
         call_kwargs = mock_http.post.call_args[1]
-        assert call_kwargs["json"]["model"] == "Doubao-Seedream-5.0-lite"
+        assert call_kwargs["json"]["model"] == "doubao-seedream-5-0-260128"
 
     @patch("apps.image_generator.doubao_image_client.httpx.Client")
     def test_generate_with_45_model(self, mock_http_class):
-        """Doubao-Seedream-4.5 模型生成成功（FR-1）。"""
+        """doubao-seedream-4-5-251128 模型生成成功（FR-1）。"""
         mock_http = self._setup_mock(mock_http_class)
         client = _make_client()
         result = client.generate_images(
-            prompt="测试 4.5", model="Doubao-Seedream-4.5", n=2
+            prompt="测试 4.5", model="doubao-seedream-4-5-251128", n=2
         )
         assert len(result.image_urls) == 1  # mock 返回 1 个
 
     @patch("apps.image_generator.doubao_image_client.httpx.Client")
     def test_generate_with_40_model(self, mock_http_class):
-        """Doubao-Seedream-4.0 模型生成成功（FR-1）。"""
+        """doubao-seedream-4-0-250828 模型生成成功（FR-1）。"""
         mock_http = self._setup_mock(mock_http_class)
         client = _make_client()
         result = client.generate_images(
-            prompt="测试 4.0", model="Doubao-Seedream-4.0", n=1
+            prompt="测试 4.0", model="doubao-seedream-4-0-250828", n=1
         )
         assert len(result.image_urls) == 1
         call_kwargs = mock_http.post.call_args[1]
-        assert call_kwargs["json"]["model"] == "Doubao-Seedream-4.0"
+        assert call_kwargs["json"]["model"] == "doubao-seedream-4-0-250828"
 
 
 # ── 高级参数过滤测试（ADR-05）────────────────────────────────────────────────
@@ -165,11 +165,11 @@ class TestDoubaoImageClientModelVersions:
 class TestDoubaoImageClientAdvancedParams:
 
     def test_build_request_body_filters_unsupported_params_lite(self):
-        """Doubao-Seedream-5.0-lite 不支持 steps，应被过滤掉（ADR-05）。"""
+        """doubao-seedream-5-0-260128 不支持 steps，应被过滤掉（ADR-05）。"""
         client = _make_client()
         body = client._build_request_body(
             prompt="test",
-            model="Doubao-Seedream-5.0-lite",
+            model="doubao-seedream-5-0-260128",
             n=1,
             size="1024x1024",
             ref_image_b64=None,
@@ -180,11 +180,11 @@ class TestDoubaoImageClientAdvancedParams:
         assert "steps" not in body  # 5.0-lite 不支持
 
     def test_build_request_body_allows_steps_for_45(self):
-        """Doubao-Seedream-4.5 支持 steps，应被保留（ADR-05）。"""
+        """doubao-seedream-4-5-251128 支持 steps，应被保留（ADR-05）。"""
         client = _make_client()
         body = client._build_request_body(
             prompt="test",
-            model="Doubao-Seedream-4.5",
+            model="doubao-seedream-4-5-251128",
             n=1,
             size="1024x1024",
             ref_image_b64=None,
@@ -198,7 +198,7 @@ class TestDoubaoImageClientAdvancedParams:
         client = _make_client()
         body = client._build_request_body(
             prompt="test",
-            model="Doubao-Seedream-4.5",
+            model="doubao-seedream-4-5-251128",
             n=1,
             size="1024x1024",
             ref_image_b64=None,
@@ -213,7 +213,7 @@ class TestDoubaoImageClientAdvancedParams:
         ref_b64 = "data:image/jpeg;base64,/9j/test=="
         body = client._build_request_body(
             prompt="test",
-            model="Doubao-Seedream-4.5",
+            model="doubao-seedream-4-5-251128",
             n=1,
             size="1024x1024",
             ref_image_b64=ref_b64,
@@ -223,9 +223,9 @@ class TestDoubaoImageClientAdvancedParams:
 
     def test_supported_models_list_completeness(self):
         """SUPPORTED_MODELS 应包含三个豆包 Seedream 版本（FR-1）。"""
-        assert "Doubao-Seedream-5.0-lite" in SUPPORTED_MODELS
-        assert "Doubao-Seedream-4.5" in SUPPORTED_MODELS
-        assert "Doubao-Seedream-4.0" in SUPPORTED_MODELS
+        assert "doubao-seedream-5-0-260128" in SUPPORTED_MODELS
+        assert "doubao-seedream-4-5-251128" in SUPPORTED_MODELS
+        assert "doubao-seedream-4-0-250828" in SUPPORTED_MODELS
         assert len(SUPPORTED_MODELS) == 3
 
 
@@ -311,7 +311,7 @@ class TestDoubaoImageClientErrorHandling:
 
         client = _make_client()
         with pytest.raises(RuntimeError) as exc_info:
-            client.generate_images(prompt="test", model="Doubao-Seedream-4.5")
+            client.generate_images(prompt="test", model="doubao-seedream-4-5-251128")
         assert "空" in str(exc_info.value) or "URL" in str(exc_info.value)
 
 
@@ -337,7 +337,7 @@ class TestDoubaoImageClientRetry:
         client = _make_client()
         # tenacity wait_fixed(5) 在测试中会真实等待，使用 patch 跳过等待
         with patch("time.sleep", return_value=None):
-            result = client.generate_images(prompt="test", model="Doubao-Seedream-4.5")
+            result = client.generate_images(prompt="test", model="doubao-seedream-4-5-251128")
 
         assert len(result.image_urls) == 1
 
@@ -354,7 +354,7 @@ class TestDoubaoImageClientRetry:
 
         client = _make_client()
         with pytest.raises(DoubaoAuthError):
-            client.generate_images(prompt="test", model="Doubao-Seedream-4.5")
+            client.generate_images(prompt="test", model="doubao-seedream-4-5-251128")
 
         # 只调用了一次，没有重试
         assert mock_http.post.call_count == 1
@@ -375,7 +375,7 @@ class TestDoubaoImageClientRetry:
 
         client = _make_client()
         with patch("time.sleep", return_value=None):
-            result = client.generate_images(prompt="test", model="Doubao-Seedream-4.0")
+            result = client.generate_images(prompt="test", model="doubao-seedream-4-0-250828")
 
         assert len(result.image_urls) == 1
         assert mock_http.post.call_count == 2
@@ -393,7 +393,7 @@ class TestDoubaoImageClientRetry:
         client = _make_client()
         with patch("time.sleep", return_value=None):
             with pytest.raises(httpx.TimeoutException):
-                client.generate_images(prompt="test", model="Doubao-Seedream-4.5")
+                client.generate_images(prompt="test", model="doubao-seedream-4-5-251128")
 
         # tenacity stop_after_attempt(2)：共调用 2 次
         assert mock_http.post.call_count == 2

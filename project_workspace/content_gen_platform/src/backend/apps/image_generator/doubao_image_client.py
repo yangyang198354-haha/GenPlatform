@@ -35,9 +35,9 @@ ARK_TIMEOUT_SECONDS = 120
 # 各模型支持的高级参数白名单（ADR-05，按官方文档维护）
 # 未来新增模型版本只需更新本常量，核心逻辑不变（NFR-5）
 MODEL_ADVANCED_PARAMS: dict[str, set[str]] = {
-    "Doubao-Seedream-5.0-lite": {"seed", "guidance_scale", "negative_prompt", "watermark"},
-    "Doubao-Seedream-4.5": {"seed", "guidance_scale", "negative_prompt", "steps", "watermark"},
-    "Doubao-Seedream-4.0": {"seed", "guidance_scale", "negative_prompt", "steps", "watermark"},
+    "doubao-seedream-5-0-260128": {"seed", "guidance_scale", "negative_prompt", "watermark"},
+    "doubao-seedream-4-5-251128": {"seed", "guidance_scale", "negative_prompt", "steps", "watermark"},
+    "doubao-seedream-4-0-250828": {"seed", "guidance_scale", "negative_prompt", "steps", "watermark"},
 }
 
 # 支持的模型列表（与 MODEL_ADVANCED_PARAMS 保持同步）
@@ -75,7 +75,7 @@ class DoubaoImageClient:
         client = DoubaoImageClient(api_key=decrypted_key)
         result = client.generate_images(
             prompt="日落时分的海边灯塔",
-            model="Doubao-Seedream-4.5",
+            model="doubao-seedream-4-5-251128",
             n=2,
         )
         for url in result.image_urls:
