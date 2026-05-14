@@ -95,7 +95,7 @@ class DoubaoImageClient:
         prompt: str,
         model: str,
         n: int = 1,
-        size: str = "1024x1024",
+        size: str = "2048x2048",
         ref_image_b64: Optional[str] = None,
         advanced_params: Optional[dict] = None,
     ) -> ImageGenerationResult:
@@ -106,7 +106,7 @@ class DoubaoImageClient:
             prompt: 提示词（1-500 字符，调用方负责校验）
             model: 豆包模型版本（须在 SUPPORTED_MODELS 内，调用方负责校验）
             n: 生成张数（1-4，调用方负责校验）
-            size: 图片尺寸，如 "1024x1024"、"1280x720"、"720x1280"
+            size: 图片尺寸，如 "2048x2048"、"2880x1620"、"1620x2880"
             ref_image_b64: base64 编码的参考图（图生图），格式 "data:image/jpeg;base64,..."
             advanced_params: 高级参数字典（函数内部按 MODEL_ADVANCED_PARAMS 白名单过滤）
 

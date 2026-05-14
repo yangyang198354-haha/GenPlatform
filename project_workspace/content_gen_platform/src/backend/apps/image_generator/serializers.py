@@ -30,7 +30,7 @@ class ImageGenerationSubmitSerializer(serializers.Serializer):
         "doubao-seedream-4-5-251128",
         "doubao-seedream-4-0-250828",
     ]
-    SUPPORTED_SIZES = ["1024x1024", "1280x720", "720x1280"]
+    SUPPORTED_SIZES = ["2048x2048", "2880x1620", "1620x2880"]
 
     prompt = serializers.CharField(
         min_length=1,
@@ -51,7 +51,7 @@ class ImageGenerationSubmitSerializer(serializers.Serializer):
     )
     size = serializers.ChoiceField(
         choices=SUPPORTED_SIZES,
-        default="1024x1024",
+        default="2048x2048",
         help_text="图片尺寸",
     )
     # 高级参数（折叠面板，OQ-2，不传则不透传给 Ark）
