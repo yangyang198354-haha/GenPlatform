@@ -154,16 +154,32 @@
           </el-form>
         </el-card>
       </el-tab-pane>
+
+      <!-- 豆包图片生成 Config（v1.1 新增，FR-6.1，ADR-09/10）-->
+      <el-tab-pane label="豆包图片生成" name="doubao_image">
+        <el-card>
+          <h3>豆包图片生成 API Key 配置</h3>
+          <DoubaoImageKeyPanel
+            :initial-configured="doubaoImageStatus.is_configured"
+            :initial-last-validated-at="doubaoImageStatus.last_validated_at"
+            @configured="onDoubaoImageConfigured"
+          />
+        </el-card>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch } from "vue";
+import { useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
 import { settingsAPI } from "@/api";
+import DoubaoImageKeyPanel from "@/components/Settings/DoubaoImageKeyPanel.vue";
 
-const activeTab = ref("llm");
+const route = useRoute();
+// 支持 URL query 参数 ?tab=doubao_image 自动定位（供 PreflightBanner 跳转使用，FR-7.1）
+const activeTab = ref(route.query.tab || "llm");
 
 // ── DeepSeek 可选模型列表 ────────────────────────────────────────────────────
 const deepseekModels = [
@@ -340,6 +356,25 @@ async function testJimengConfig() {
   }
 }
 
+// ── 豆包图片生成（v1.1 新增，FR-6.1，ADR-09）────────────────────────────────
+const doubaoImageStatus = ref({
+  is_configured: false,
+  last_validated_at: null,
+});
+
+/**
+ * DoubaoImageKeyPanel emit('configured') 事件处理。
+ * 重新查询 status 以刷新 is_configured 和 last_validated_at（US-08 AC-08-4）。
+ */
+async function onDoubaoImageConfigured() {
+  try {
+    const { data } = await settingsAPI.getServiceStatus("doubao_image");
+    doubaoImageStatus.value = data;
+  } catch (_) {
+    // 配置成功后刷新失败，不影响主流程，组件本地状态已更新
+  }
+}
+
 // ── Storage ──────────────────────────────────────────────────────────────────
 const storageForm   = ref({ backend: "local", endpoint: "", access_key: "", secret_key: "", bucket: "content-gen" });
 const savingStorage = ref(false);
@@ -358,6 +393,14 @@ async function saveStorageConfig() {
 
 // ── 初始加载：用 list() 拿所有已配置项，逐一填充表单 ───────────────────────
 onMounted(async () => {
+  // 加载豆包图片生成状态（ADR-09，FR-7.1）
+  try {
+    const { data: statusData } = await settingsAPI.getServiceStatus("doubao_image");
+    doubaoImageStatus.value = statusData;
+  } catch (_) {
+    // 未配置时忽略错误
+  }
+
   try {
     const { data } = await settingsAPI.list();
     // 记录哪些 provider 已配置，用于决定最终显示哪个
