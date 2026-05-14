@@ -104,25 +104,6 @@
         </el-card>
       </el-tab-pane>
 
-      <!-- Jimeng Config -->
-      <el-tab-pane label="即梦 API" name="jimeng">
-        <el-card>
-          <h3>即梦（即创）视频 API</h3>
-          <el-form :model="jimengForm" label-width="140px">
-            <el-form-item label="Access Key ID">
-              <el-input v-model="jimengForm.access_key" />
-            </el-form-item>
-            <el-form-item label="Secret Access Key">
-              <el-input v-model="jimengForm.secret_key" show-password />
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary" :loading="savingJimeng" @click="saveJimengConfig">保存</el-button>
-              <el-button :loading="testingJimeng" @click="testJimengConfig">测试连接</el-button>
-            </el-form-item>
-          </el-form>
-        </el-card>
-      </el-tab-pane>
-
       <!-- Storage Config -->
       <el-tab-pane label="存储设置" name="storage">
         <el-card>
@@ -320,42 +301,6 @@ async function testLlmConfig() {
   }
 }
 
-// ── Jimeng ──────────────────────────────────────────────────────────────────
-const jimengForm    = ref({ access_key: "", secret_key: "" });
-const savingJimeng  = ref(false);
-const testingJimeng = ref(false);
-
-async function saveJimengConfig() {
-  savingJimeng.value = true;
-  try {
-    await settingsAPI.save("jimeng", {
-      access_key: jimengForm.value.access_key,
-      secret_key: jimengForm.value.secret_key,
-    });
-    ElMessage.success("即梦配置已保存");
-  } catch (e) {
-    ElMessage.error(e.response?.data?.error || "保存失败");
-  } finally {
-    savingJimeng.value = false;
-  }
-}
-
-async function testJimengConfig() {
-  testingJimeng.value = true;
-  try {
-    const { data } = await settingsAPI.test("jimeng");
-    if (data.success) {
-      ElMessage.success(data.message || "连接测试通过");
-    } else {
-      ElMessage.error(data.message || "连接测试失败");
-    }
-  } catch (e) {
-    ElMessage.error("连接测试失败");
-  } finally {
-    testingJimeng.value = false;
-  }
-}
-
 // ── 豆包图片生成（v1.1 新增，FR-6.1，ADR-09）────────────────────────────────
 const doubaoImageStatus = ref({
   is_configured: false,
@@ -421,9 +366,6 @@ onMounted(async () => {
         if (preview.doubao_model) llmSavedConfig.value.volcano.doubao_model = preview.doubao_model;
         if (preview.temperature != null) llmSavedConfig.value.volcano.temperature = preview.temperature;
         if (preview.max_tokens  != null) llmSavedConfig.value.volcano.max_tokens  = preview.max_tokens;
-      } else if (cfg.service_type === "jimeng" && cfg.is_configured) {
-        if (preview.access_key) jimengForm.value.access_key = preview.access_key;
-        if (preview.secret_key) jimengForm.value.secret_key = preview.secret_key;
       }
     }
     // 优先显示已配置的 provider；两者都有则保持默认（deepseek）

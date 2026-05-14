@@ -111,3 +111,56 @@ class TestServiceConfigDetailView:
         )
         assert resp.status_code == 400
         assert "error" in resp.data
+
+
+@pytest.mark.django_db
+class TestJimengV12Cleanup:
+    """
+    v1.2 即梦清理验证测试（AC-08-2, AC-08-4）。
+
+    验证：
+    - jimeng 枚举值在 SERVICE_CHOICES 中仍存在（DB 兼容，不删历史数据）
+    - 历史 jimeng 记录可以通过 DB 正常创建和查询（历史数据保留）
+    - 前端 API 不提供 jimeng 图片专属路由（AC-08-4 — 在 URL 层验证）
+    """
+
+    def test_jimeng_service_type_still_in_service_choices_canary(self):
+        """
+        【Canary 守卫 AC-08-2】jimeng 仍在 SERVICE_CHOICES 中。
+
+        若此测试失败，说明有人删除了 jimeng 枚举，可能导致历史数据迁移问题。
+        """
+        choices = dict(UserServiceConfig.SERVICE_CHOICES)
+        assert "jimeng" in choices, (
+            "jimeng 必须保留在 SERVICE_CHOICES 中以兼容历史数据（AC-08-2）"
+        )
+
+    def test_jimeng_historical_record_can_be_created_and_queried(self, user, db):
+        """
+        AC-08-2：历史 jimeng 类型的 UserServiceConfig 记录仍可正常写入和查询。
+        """
+        cfg = UserServiceConfig.objects.create(
+            user=user,
+            service_type="jimeng",
+            encrypted_config=encrypt({"access_key": "legacy-key"}),
+            is_active=True,
+        )
+        fetched = UserServiceConfig.objects.get(pk=cfg.pk)
+        assert fetched.service_type == "jimeng"
+        assert fetched.is_active is True
+
+    def test_image_generator_urls_have_no_jimeng_routes(self):
+        """
+        AC-08-4：image_generator URL 中无专属即梦图片路由。
+
+        通过检查 urls.py 中无 jimeng 关键词验证（不依赖 DB）。
+        """
+        import importlib
+        import apps.image_generator.urls as img_urls_module
+        # 检查路由列表中无 jimeng 相关 pattern
+        url_patterns = getattr(img_urls_module, 'urlpatterns', [])
+        for pattern in url_patterns:
+            pattern_str = str(pattern.pattern)
+            assert 'jimeng' not in pattern_str.lower(), (
+                f"image_generator URL 中发现 jimeng 相关路由：{pattern_str}（AC-08-4）"
+            )
