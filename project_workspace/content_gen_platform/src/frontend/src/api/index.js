@@ -175,6 +175,33 @@ export const settingsAPI = {
   save: (serviceType, data) => api.put(`/settings/services/${serviceType}/`, data),
   test: (serviceType) => api.post(`/settings/services/${serviceType}/test/`),
   list: () => api.get("/settings/services/"),
+
+  /**
+   * 查询服务配置状态（仅返回 is_configured，不含 Key 内容）。
+   *
+   * 安全约束：响应体不含任何 api_key 派生信息（由后端 ServiceStatusView 保证）。
+   * 关联需求：FR-7.1、ADR-09
+   *
+   * @param {string} serviceType - 服务类型，如 "doubao_image"
+   * @returns {Promise<{is_configured: boolean, last_validated_at: string|null}>}
+   */
+  getServiceStatus: (serviceType) =>
+    api.get(`/settings/users/me/services/${serviceType}/status/`),
+
+  /**
+   * 测试并保存 API Key（原子操作：测试通过即自动保存，OQ-8=A）。
+   *
+   * 关联需求：FR-6.3、ADR-10
+   *
+   * @param {string} serviceType - 服务类型，如 "doubao_image"
+   * @param {string} apiKey - 用户输入的 API Key（不在前端日志中记录）
+   * @returns {Promise<{saved: boolean, last_validated_at: string}>}
+   * @throws {AxiosError} 400 - {error: "ARK_KEY_INVALID"|"ARK_QUOTA_EXCEEDED"|"ARK_UNREACHABLE", detail: string}
+   */
+  testAndSaveServiceKey: (serviceType, apiKey) =>
+    api.post(`/settings/users/me/services/${serviceType}/test-and-save/`, {
+      api_key: apiKey,
+    }),
 };
 
 // ── Image Generator API（豆包 Seedream 版本）──────────────────────────────

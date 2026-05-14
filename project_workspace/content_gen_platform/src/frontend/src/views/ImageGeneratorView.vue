@@ -5,6 +5,10 @@
       <span class="page-subtitle">使用豆包 Seedream 系列模型根据文字描述生成图片</span>
     </div>
 
+    <!-- 预检 Banner：API Key 未配置时常驻显示（FR-7.1，OQ-7=A，US-08 AC-08-1）-->
+    <!-- v-if 控制渲染：is_configured=false 时显示，true 时不渲染（无关闭按钮需求）-->
+    <PreflightBanner v-if="!doubaoIsConfigured" />
+
     <!-- Tab 页：生成 / 批次管理 -->
     <el-tabs v-model="activeTab" class="main-tabs">
       <!-- Tab 1：图片生成 -->
@@ -185,7 +189,8 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRouter } from 'vue-router'
 import {
   Upload, Delete, Picture, Loading, Download, CircleClose,
 } from '@element-plus/icons-vue'
@@ -195,8 +200,10 @@ import ModelSelector from '@/components/ImageGenerator/ModelSelector.vue'
 import AdvancedParamsPanel from '@/components/ImageGenerator/AdvancedParamsPanel.vue'
 import BatchCountSelector from '@/components/ImageGenerator/BatchCountSelector.vue'
 import BatchListPage from '@/views/ImageGeneratorView/BatchListPage.vue'
+import PreflightBanner from '@/components/ImageGenerator/PreflightBanner.vue'
 
 const auth = useAuthStore()
+const router = useRouter()
 
 // Tab 状态
 const activeTab = ref('generate')
@@ -217,6 +224,9 @@ const currentBatch = ref(null)   // 当前批次信息（batch_id / batch_name /
 const completedImages = ref([])  // 已完成的图片列表 [{request_id, file_url}]
 const generationError = ref('')
 
+// 预检状态：doubao_image API Key 是否已配置（FR-7.1，US-08 AC-08-1）
+const doubaoIsConfigured = ref(true)  // 默认 true，避免首次加载时闪烁
+
 // WebSocket
 let ws = null
 
@@ -227,17 +237,29 @@ const batchProgress = computed(() => {
 
 onMounted(async () => {
   connectWebSocket()
-  await checkApiKeyConfigured()
+  await fetchDoubaoStatus()
 })
+
+// 从设置页返回时由 onMounted 触发刷新（AppLayout 未启用 keep-alive，组件每次进入都重新挂载）。
+// US-08 AC-08-4 验收：用户配置 Key 成功 → 返回 /image-generator → onMounted → fetchDoubaoStatus → Banner 消失。
 
 onUnmounted(() => {
   if (ws) ws.close()
 })
 
-// 检查是否配置了 API Key（AC-01-4）
-const checkApiKeyConfigured = async () => {
-  // 仅作检查，不阻塞页面加载
-  // 实际提交时后端会返回 400 并给出明确提示
+/**
+ * 查询 doubao_image 服务配置状态（FR-7.1，ADR-09）。
+ * 成功：根据 is_configured 控制 PreflightBanner 的显隐。
+ * 失败：保守处理，doubaoIsConfigured=true（不误显示 Banner）。
+ */
+const fetchDoubaoStatus = async () => {
+  try {
+    const { data } = await settingsAPI.getServiceStatus('doubao_image')
+    doubaoIsConfigured.value = data.is_configured
+  } catch (_) {
+    // 网络错误等异常：保守处理，不显示 Banner（避免误报）
+    doubaoIsConfigured.value = true
+  }
 }
 
 const connectWebSocket = () => {
@@ -373,8 +395,28 @@ const submitGeneration = async () => {
     }
   } catch (err) {
     isGenerating.value = false
-    const errMsg = err.response?.data?.error || '提交失败，请检查豆包 API Key 是否已配置（AC-01-4）'
-    ElMessage.error(errMsg)
+    const errorCode = err.response?.data?.error || ''
+    const errMsg = err.response?.data?.detail || err.response?.data?.error || '提交失败，请检查豆包 API Key 是否已配置'
+
+    // ARK_KEY_INVALID 或未配置类错误：提供"前往配置"可点击提示（FR-7.2，US-08 AC-08-3）
+    const isKeyError = ['ARK_KEY_INVALID', 'DOUBAO_IMAGE_NOT_CONFIGURED'].includes(errorCode) ||
+      errMsg.includes('未配置') || errMsg.includes('API Key')
+    if (isKeyError) {
+      ElMessageBox.confirm(
+        errMsg + '\n\n是否立即前往设置页配置 API Key？',
+        '豆包图片生成 Key 未配置',
+        {
+          confirmButtonText: '前往配置',
+          cancelButtonText: '稍后再说',
+          type: 'warning',
+        }
+      ).then(() => {
+        router.push({ path: '/settings', query: { tab: 'doubao_image' } })
+      }).catch(() => {/* 用户选择稍后，忽略 */})
+    } else {
+      ElMessage.error(errMsg)
+    }
+
     generationError.value = errMsg
   }
 }
