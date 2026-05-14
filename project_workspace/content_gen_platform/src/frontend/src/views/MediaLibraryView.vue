@@ -39,12 +39,19 @@
       >
         <!-- Thumbnail / Preview -->
         <div class="media-thumb">
-          <img
+          <!-- 图片类型：使用 el-image preview-src-list 实现 Lightbox（v1.2，FR-3.1，ADR-v1.2-03）
+               preview-teleported 将弹层挂载到 body，避免 z-index 被 overflow:hidden 截断。
+          -->
+          <el-image
             v-if="item.media_type === 'image'"
             :src="item.file_url"
+            :preview-src-list="allImageUrls"
+            :initial-index="getImageIndex(item)"
             :alt="item.title"
             class="thumb-img"
+            fit="cover"
             loading="lazy"
+            preview-teleported
           />
           <div v-else-if="item.media_type === 'video'" class="thumb-video">
             <video :src="item.file_url" class="thumb-img" preload="metadata" />
@@ -216,6 +223,20 @@ const page = ref(1)
 const pageSize = 24
 const hasMore = computed(() => items.value.length < total.value)
 const hoveredId = ref(null)
+
+// ── v1.2 Lightbox：所有图片 URL 数组（供 el-image preview-src-list 多图切换，FR-3.2）──
+// IMPORTANT: 声明在 items 之后，避免 TDZ 问题（参考文件顶部注释）。
+const allImageUrls = computed(() =>
+  items.value
+    .filter(item => item.media_type === 'image' && item.file_url)
+    .map(item => item.file_url)
+)
+
+// 获取当前图片在 allImageUrls 中的索引（供 initial-index 定位）
+function getImageIndex(item) {
+  const idx = allImageUrls.value.indexOf(item.file_url)
+  return idx >= 0 ? idx : 0
+}
 
 // Upload dialog state
 const showUploadDialog = ref(false)
