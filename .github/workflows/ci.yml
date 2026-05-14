@@ -1,15 +1,60 @@
 name: CI/CD Pipeline
 
+# 部署策略：push 默认走物理机部署（physical），Docker 部署保留作为可选手动模式。
+# 手动触发 (workflow_dispatch) 时可显式选择 docker / physical / none。
+# Pull Request 不触发任何部署，仅跑测试。
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_mode:
+        description: '部署模式（push 默认 physical，本输入仅手动触发时生效）'
+        type: choice
+        options:
+          - physical
+          - docker
+          - none
+        default: physical
+      run_setup:
+        description: '物理部署是否执行 setup_system.sh（首次必须 true，热更新 false 加速）'
+        type: boolean
+        default: false
 
 env:
   REGISTRY: ghcr.io
 
 jobs:
+  # Stage 0: Resolve Deploy Mode
+  # push (main/develop) -> physical
+  # pull_request        -> none
+  # workflow_dispatch   -> 用户输入（默认 physical）
+  compute-deploy-mode:
+    name: Resolve Deploy Mode
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.resolve.outputs.mode }}
+      run_setup: ${{ steps.resolve.outputs.run_setup }}
+    steps:
+      - id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "mode=none" >> $GITHUB_OUTPUT
+            echo "run_setup=false" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ inputs.deploy_mode }}" >> $GITHUB_OUTPUT
+            echo "run_setup=${{ inputs.run_setup }}" >> $GITHUB_OUTPUT
+          else
+            # push event — default to physical
+            echo "mode=physical" >> $GITHUB_OUTPUT
+            echo "run_setup=false" >> $GITHUB_OUTPUT
+          fi
+          echo "===== Deploy Mode Resolved ====="
+          echo "event:     ${{ github.event_name }}"
+          cat $GITHUB_OUTPUT
+
   # Stage 1: Lint & Static Analysis
   lint:
     name: Lint & Security Scan
@@ -232,12 +277,12 @@ jobs:
           path: project_workspace/content_gen_platform/src/frontend/dist/
           retention-days: 3
 
-  # Stage 5: Docker Build & Push (main branch only)
+  # Stage 5: Docker Build & Push (仅当 deploy_mode == 'docker' 时执行)
   docker-build:
     name: Docker Build & Push
     runs-on: ubuntu-latest
-    needs: [test-integration, build-frontend]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [test-integration, build-frontend, compute-deploy-mode]
+    if: needs.compute-deploy-mode.outputs.mode == 'docker' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: write
@@ -295,13 +340,14 @@ jobs:
           cache-from: type=registry,ref=${{ env.IMAGE_BASE }}/frontend:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE_BASE }}/frontend:buildcache,mode=max
 
-  # Stage 6: Validate production image before deploy
+  # Stage 6: Validate production image before deploy (仅 docker 模式)
   # Catches boot failures, broken migrations, and import errors in CI
   # before they ever reach the production server.
   validate-image:
     name: Validate Production Image
     runs-on: ubuntu-latest
-    needs: docker-build
+    needs: [docker-build, compute-deploy-mode]
+    if: needs.compute-deploy-mode.outputs.mode == 'docker'
     steps:
       - uses: actions/checkout@v4
 
@@ -404,11 +450,12 @@ jobs:
         if: always()
         run: docker rm -f validate-backend validate-db validate-redis 2>/dev/null || true
 
-  # Stage 7: Deploy to Production (Aliyun ECS)
+  # Stage 7a: Deploy to Production via Docker (Aliyun ECS) — 仅 docker 模式
   deploy-production:
-    name: Deploy to Production (Aliyun)
+    name: Deploy to Production (Aliyun, Docker)
     runs-on: ubuntu-latest
-    needs: validate-image
+    needs: [validate-image, compute-deploy-mode]
+    if: needs.compute-deploy-mode.outputs.mode == 'docker'
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -549,11 +596,133 @@ jobs:
             echo "--- Celery worker startup logs ---"
             docker compose logs --tail=50 celery_worker || true
 
+  # Stage 7b: Deploy to Production via Physical (Aliyun ECS) — 默认模式
+  # 物理机部署，复用 deploy-physical.yml 的核心脚本。push 触发时默认走此路径。
+  # 部署前会停止 Docker compose 释放端口/内存，然后用 systemd 管理 django/celery 服务。
+  deploy-physical-prod:
+    name: Deploy to Production (Aliyun, Physical)
+    runs-on: ubuntu-latest
+    needs: [test-integration, build-frontend, compute-deploy-mode]
+    if: needs.compute-deploy-mode.outputs.mode == 'physical' && github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      # 从 GitHub Actions runner 直接 scp 上传源码，绕开服务器 git 依赖。
+      # rm: false 保留服务器上已有的 .env / media / logs 等文件。
+      - name: Upload source code to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          password: ${{ secrets.PROD_PASSWORD }}
+          source: "scripts,deploy,project_workspace,Makefile,.env.example"
+          target: /opt/genplatform/app
+          rm: false
+
+      - name: Deploy on production server (physical)
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          RUN_SETUP: ${{ needs.compute-deploy-mode.outputs.run_setup }}
+          PUBLIC_HOST: ${{ secrets.PROD_HOST }}
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          password: ${{ secrets.PROD_PASSWORD }}
+          envs: RUN_SETUP,PUBLIC_HOST
+          command_timeout: 90m
+          script: |
+            set -e
+
+            APP_DIR=/opt/genplatform
+            echo "===== GenPlatform 物理机部署 (CI/CD Pipeline) ====="
+            echo "APP_DIR:   $APP_DIR"
+            echo "Run setup: $RUN_SETUP"
+
+            # ── 1: 生成 .env（首次部署自动生成；已存在跳过）──────────────────
+            ENV_FILE="$APP_DIR/app/.env"
+            if [ ! -f "$ENV_FILE" ]; then
+              echo "--- 生成 .env（首次部署）---"
+              SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(50))")
+              ENCRYPTION_KEY=$(python3 -c "import os,base64; print(base64.urlsafe_b64encode(os.urandom(32)).decode())")
+              PG_PASS=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+              INTERNAL_IP=$(hostname -I | awk '{print $1}')
+              PUB="${PUBLIC_HOST:-$INTERNAL_IP}"
+
+              mkdir -p "$APP_DIR/app"
+              cat > "$ENV_FILE" <<ENVEOF
+            DJANGO_SECRET_KEY=${SECRET_KEY}
+            DJANGO_SETTINGS_MODULE=config.settings.production
+            DEBUG=False
+            ENCRYPTION_KEY=${ENCRYPTION_KEY}
+            POSTGRES_DB=content_gen_platform
+            POSTGRES_USER=postgres
+            POSTGRES_PASSWORD=${PG_PASS}
+            DATABASE_URL=postgresql://postgres:${PG_PASS}@localhost:5432/content_gen_platform
+            REDIS_URL=redis://localhost:6379/0
+            ALLOWED_HOSTS=localhost,127.0.0.1,${INTERNAL_IP},${PUB}
+            CORS_ALLOWED_ORIGINS=http://${PUB}
+            STORAGE_BACKEND=local
+            MEDIA_ROOT=/opt/genplatform/media
+            EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+            HF_ENDPOINT=https://hf-mirror.com
+            APP_DIR=/opt/genplatform
+            BRANCH=main
+            ENVEOF
+              chmod 600 "$ENV_FILE"
+              echo "[OK] .env 已生成"
+            else
+              echo "[SKIP] .env 已存在"
+            fi
+
+            # ── 1-patch: 幂等补丁——确保 .env 包含 PUBLIC_HOST ───────────────
+            if [ -f "$ENV_FILE" ] && [ -n "$PUBLIC_HOST" ]; then
+              if ! grep -q "ALLOWED_HOSTS=.*$PUBLIC_HOST" "$ENV_FILE"; then
+                sed -i "s/^ALLOWED_HOSTS=\(.*\)/ALLOWED_HOSTS=\1,$PUBLIC_HOST/" "$ENV_FILE"
+                echo "[OK] Patched ALLOWED_HOSTS"
+              fi
+              if ! grep -q "CORS_ALLOWED_ORIGINS=.*$PUBLIC_HOST" "$ENV_FILE"; then
+                sed -i "s|^CORS_ALLOWED_ORIGINS=\(.*\)|CORS_ALLOWED_ORIGINS=\1,http://$PUBLIC_HOST|" "$ENV_FILE"
+                echo "[OK] Patched CORS_ALLOWED_ORIGINS"
+              fi
+            fi
+
+            # ── 2: 停止 Docker 容器（释放端口 80 与内存）─────────────────────
+            echo "--- 停止 Docker 容器 ---"
+            if command -v docker &>/dev/null; then
+              docker compose -f /opt/content-gen-platform/docker-compose.yml down 2>/dev/null || true
+              RUNNING=$(docker ps -q 2>/dev/null || true)
+              [ -n "$RUNNING" ] && docker stop $RUNNING 2>/dev/null || true
+              docker system prune -f 2>/dev/null || true
+              echo "[OK] Docker 容器已停止"
+            else
+              echo "[SKIP] Docker 未安装"
+            fi
+
+            # ── 3: 系统依赖安装（幂等；首次必须，热更新可跳过）───────────────
+            if [ "$RUN_SETUP" = "true" ]; then
+              echo "--- 系统环境安装 (setup_system.sh) ---"
+              APP_DIR="$APP_DIR" bash "$APP_DIR/app/scripts/deploy/setup_system.sh"
+            else
+              echo "--- 跳过系统环境安装（run_setup=false）---"
+            fi
+
+            # ── 4: 物理机完整部署 ──────────────────────────────────────────
+            echo "--- 物理机部署 (deploy_physical.sh) ---"
+            APP_DIR="$APP_DIR" SKIP_CODE_SYNC=1 \
+              bash "$APP_DIR/app/scripts/deploy/deploy_physical.sh"
+
+            echo "===== 物理机部署完成 ====="
+
   # Stage 8: Post-deploy Smoke Tests
+  # 兼容 docker 与 physical 两条 deploy 路径：任一成功即触发。
   smoke-test:
     name: Post-deploy Smoke Tests
     runs-on: ubuntu-latest
-    needs: deploy-production
+    needs: [deploy-production, deploy-physical-prod]
+    if: |
+      always() &&
+      (needs.deploy-production.result == 'success' || needs.deploy-physical-prod.result == 'success')
     env:
       BASE_URL: http://${{ secrets.PROD_HOST }}
     steps:
@@ -570,7 +739,10 @@ jobs:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
     needs: smoke-test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: |
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs.smoke-test.result == 'success'
     defaults:
       run:
         working-directory: project_workspace/content_gen_platform/src/tests
