@@ -43,6 +43,22 @@
                 />
               </div>
 
+              <!-- 生成模式切换（v1.2，FR-1.4，FR-2.4）-->
+              <div class="form-section">
+                <GenerationModeSelector
+                  v-model="batchCount"
+                  :disabled="isGenerating"
+                />
+              </div>
+
+              <!-- 图片尺寸（v1.2，FR-1.2，ADR-v1.2-01）-->
+              <div class="form-section">
+                <SizeSelector
+                  v-model="sizeValue"
+                  :disabled="isGenerating"
+                />
+              </div>
+
               <!-- 参考图上传（FR-3）-->
               <div class="form-section">
                 <label class="field-label">参考图片（可选，图生图）</label>
@@ -81,14 +97,6 @@
                   accept="image/jpeg,image/png"
                   style="display: none"
                   @change="handleFileSelect"
-                />
-              </div>
-
-              <!-- 生成张数（OQ-4，前端第二层约束）-->
-              <div class="form-section">
-                <BatchCountSelector
-                  v-model="batchCount"
-                  :disabled="isGenerating"
                 />
               </div>
 
@@ -198,7 +206,8 @@ import { imageAPI, settingsAPI } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import ModelSelector from '@/components/ImageGenerator/ModelSelector.vue'
 import AdvancedParamsPanel from '@/components/ImageGenerator/AdvancedParamsPanel.vue'
-import BatchCountSelector from '@/components/ImageGenerator/BatchCountSelector.vue'
+import GenerationModeSelector from '@/components/ImageGenerator/GenerationModeSelector.vue'
+import SizeSelector from '@/components/ImageGenerator/SizeSelector.vue'
 import BatchListPage from '@/views/ImageGeneratorView/BatchListPage.vue'
 import PreflightBanner from '@/components/ImageGenerator/PreflightBanner.vue'
 
@@ -213,6 +222,13 @@ const prompt = ref('')
 const selectedModel = ref('doubao-seedream-4-5-251128')
 const batchCount = ref(1)
 const advancedParams = ref({})
+// v1.2：尺寸三模式（SizeSelector 绑定值）
+const sizeValue = ref({
+  size_mode:  'pixel',
+  size:       '2048x2048',
+  size_tier:  '2K',
+  size_ratio: '1:1',
+})
 const refImageFile = ref(null)
 const refImagePreview = ref('')
 const isDragging = ref(false)
@@ -371,6 +387,16 @@ const submitGeneration = async () => {
   formData.append('model', selectedModel.value)
   formData.append('n', String(batchCount.value))
 
+  // v1.2：尺寸三模式参数（SizeSelector，FR-1.2）
+  const sv = sizeValue.value
+  formData.append('size_mode', sv.size_mode)
+  if (sv.size_mode === 'pixel')  formData.append('size', sv.size)
+  if (sv.size_mode === 'tier')   formData.append('size_tier', sv.size_tier)
+  if (sv.size_mode === 'ratio') {
+    formData.append('size_ratio', sv.size_ratio)
+    formData.append('size_tier', sv.size_tier)
+  }
+
   // 高级参数（折叠面板传入，非空才追加）
   const ap = advancedParams.value
   if (ap.seed !== null && ap.seed !== undefined) formData.append('seed', String(ap.seed))
@@ -464,9 +490,15 @@ const downloadImage = (url) => {
 
 .generator-layout {
   display: grid;
-  grid-template-columns: 380px 1fr;
+  grid-template-columns: 480px 1fr;
   gap: 20px;
   align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .generator-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 900px) {
