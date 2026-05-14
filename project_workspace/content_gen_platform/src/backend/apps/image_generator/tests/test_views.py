@@ -164,6 +164,62 @@ class TestImageGenerationSubmitView:
         for req in requests:
             assert req.provider == "doubao"
 
+    # ── v1.2 新增：尺寸三模式透传测试 ─────────────────────────────────────────
+
+    def test_submit_tier_mode_size_is_normalized(self, auth_client):
+        """v1.2 TC-VIEW-01: size_mode=tier, size_tier=3K → task.delay 接收 size='3072x3072'。"""
+        client, user = auth_client
+        with patch("apps.image_generator.views.generate_image_task") as mock_task:
+            mock_task.delay = MagicMock()
+            resp = client.post(
+                "/api/v1/image/generate/",
+                {
+                    "prompt": "test",
+                    "model": "doubao-seedream-4-5-251128",
+                    "size_mode": "tier",
+                    "size_tier": "3K",
+                },
+                format="json",
+            )
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        # 验证 task.delay 的 size 参数已归一化
+        call_kwargs = mock_task.delay.call_args[1]
+        assert call_kwargs.get("size") == "3072x3072"
+
+    def test_submit_ratio_mode_size_is_normalized(self, auth_client):
+        """v1.2 TC-VIEW-02: size_mode=ratio, size_ratio=9:16, size_tier=3K → size='2160x3840'。"""
+        client, user = auth_client
+        with patch("apps.image_generator.views.generate_image_task") as mock_task:
+            mock_task.delay = MagicMock()
+            resp = client.post(
+                "/api/v1/image/generate/",
+                {
+                    "prompt": "test",
+                    "model": "doubao-seedream-4-5-251128",
+                    "size_mode": "ratio",
+                    "size_ratio": "9:16",
+                    "size_tier": "3K",
+                },
+                format="json",
+            )
+        assert resp.status_code == status.HTTP_202_ACCEPTED
+        call_kwargs = mock_task.delay.call_args[1]
+        assert call_kwargs.get("size") == "2160x3840"
+
+    def test_submit_invalid_pixel_size_returns_400(self, auth_client):
+        """v1.2 TC-VIEW-03: size_mode=pixel 配合非法 size → 400（AC-01-2）。"""
+        client, _ = auth_client
+        resp = client.post(
+            "/api/v1/image/generate/",
+            {
+                "prompt": "test",
+                "size_mode": "pixel",
+                "size": "999x999",
+            },
+            format="json",
+        )
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+
 
 @pytest.mark.django_db
 class TestImageGenerationStatusView:

@@ -207,25 +207,139 @@ class TestSubmitSerializerAdvancedParams:
 
 
 class TestSubmitSerializerSizeValidation:
-    """尺寸枚举校验测试。"""
+    """尺寸枚举校验测试（pixel 模式，向下兼容）。"""
 
     def test_valid_size_2048x2048(self):
-        """2048x2048 是默认合法尺寸。"""
+        """2048x2048 是默认合法尺寸（pixel 模式）。"""
         s = ImageGenerationSubmitSerializer(data={"prompt": "test", "size": "2048x2048"})
-        assert s.is_valid()
+        assert s.is_valid(), f"错误：{s.errors}"
+        assert s.validated_data["size"] == "2048x2048"
 
     def test_valid_size_2880x1620(self):
         """2880x1620（横向）是合法尺寸。"""
         s = ImageGenerationSubmitSerializer(data={"prompt": "test", "size": "2880x1620"})
-        assert s.is_valid()
+        assert s.is_valid(), f"错误：{s.errors}"
 
     def test_valid_size_1620x2880(self):
         """1620x2880（竖向）是合法尺寸。"""
         s = ImageGenerationSubmitSerializer(data={"prompt": "test", "size": "1620x2880"})
-        assert s.is_valid()
+        assert s.is_valid(), f"错误：{s.errors}"
 
-    def test_invalid_size_is_rejected(self):
-        """不在枚举中的尺寸应被拒绝。"""
+    def test_valid_size_4096x4096(self):
+        """v1.2 新增：4096x4096（4K 方图）是合法尺寸。"""
         s = ImageGenerationSubmitSerializer(data={"prompt": "test", "size": "4096x4096"})
+        assert s.is_valid(), f"4096x4096 在 v1.2 应合法，错误：{s.errors}"
+        assert s.validated_data["size"] == "4096x4096"
+
+    def test_invalid_size_999x999_is_rejected(self):
+        """不在枚举中的尺寸应被拒绝（pixel 模式，AC-01-2）。"""
+        s = ImageGenerationSubmitSerializer(data={"prompt": "test", "size": "999x999"})
         assert not s.is_valid()
         assert "size" in s.errors
+
+    def test_invalid_size_1920x1080_is_rejected(self):
+        """1920x1080 不在 Ark 白名单中，应被拒绝。"""
+        s = ImageGenerationSubmitSerializer(data={"prompt": "test", "size": "1920x1080"})
+        assert not s.is_valid()
+        assert "size" in s.errors
+
+
+class TestSubmitSerializerSizeModeV12:
+    """v1.2 新增：尺寸三模式归一化测试（TC-SER 系列）。"""
+
+    def _base(self):
+        return {"prompt": "test", "model": "doubao-seedream-4-5-251128"}
+
+    # ── tier 模式 ─────────────────────────────────────────────────────────────
+
+    def test_tier_mode_3k_maps_to_3072x3072(self):
+        """TC-SER-01: size_mode=tier, size_tier=3K → validated_data["size"]="3072x3072"。"""
+        data = {**self._base(), "size_mode": "tier", "size_tier": "3K"}
+        s = ImageGenerationSubmitSerializer(data=data)
+        assert s.is_valid(), f"错误：{s.errors}"
+        assert s.validated_data["size"] == "3072x3072"
+
+    def test_tier_mode_4k_maps_to_4096x4096(self):
+        """TC-SER-02: size_mode=tier, size_tier=4K → "4096x4096"（AC-02-2）。"""
+        data = {**self._base(), "size_mode": "tier", "size_tier": "4K"}
+        s = ImageGenerationSubmitSerializer(data=data)
+        assert s.is_valid(), f"错误：{s.errors}"
+        assert s.validated_data["size"] == "4096x4096"
+
+    def test_tier_mode_default_tier_is_2k(self):
+        """TC-SER-03: size_mode=tier 缺 size_tier → 使用默认值 "2K" → "2048x2048"（AC-02-1）。"""
+        data = {**self._base(), "size_mode": "tier"}
+        s = ImageGenerationSubmitSerializer(data=data)
+        assert s.is_valid(), f"错误：{s.errors}"
+        assert s.validated_data["size"] == "2048x2048"
+
+    # ── ratio 模式 ────────────────────────────────────────────────────────────
+
+    def test_ratio_mode_9x16_2k_maps_correctly(self):
+        """TC-SER-04: size_mode=ratio, size_ratio=9:16, size_tier=2K → "1620x2880"（AC-03-1）。"""
+        data = {**self._base(), "size_mode": "ratio", "size_ratio": "9:16", "size_tier": "2K"}
+        s = ImageGenerationSubmitSerializer(data=data)
+        assert s.is_valid(), f"错误：{s.errors}"
+        assert s.validated_data["size"] == "1620x2880"
+
+    def test_ratio_mode_16x9_4k_maps_correctly(self):
+        """TC-SER-05: size_mode=ratio, size_ratio=16:9, size_tier=4K → "4096x2304"（AC-03-3）。"""
+        data = {**self._base(), "size_mode": "ratio", "size_ratio": "16:9", "size_tier": "4K"}
+        s = ImageGenerationSubmitSerializer(data=data)
+        assert s.is_valid(), f"错误：{s.errors}"
+        assert s.validated_data["size"] == "4096x2304"
+
+    def test_ratio_mode_9x16_3k_maps_correctly(self):
+        """TC-SER-06: size_mode=ratio, size_ratio=9:16, size_tier=3K → "2160x3840"（AC-03-4）。"""
+        data = {**self._base(), "size_mode": "ratio", "size_ratio": "9:16", "size_tier": "3K"}
+        s = ImageGenerationSubmitSerializer(data=data)
+        assert s.is_valid(), f"错误：{s.errors}"
+        assert s.validated_data["size"] == "2160x3840"
+
+    def test_ratio_mode_4x3_2k_maps_correctly(self):
+        """TC-SER-07: size_mode=ratio, size_ratio=4:3, size_tier=2K → "2880x2160"（AC-03-2）。"""
+        data = {**self._base(), "size_mode": "ratio", "size_ratio": "4:3", "size_tier": "2K"}
+        s = ImageGenerationSubmitSerializer(data=data)
+        assert s.is_valid(), f"错误：{s.errors}"
+        assert s.validated_data["size"] == "2880x2160"
+
+    def test_ratio_mode_default_tier_is_2k(self):
+        """TC-SER-08: ratio 模式不传 size_tier 时默认使用 2K。"""
+        data = {**self._base(), "size_mode": "ratio", "size_ratio": "16:9"}
+        s = ImageGenerationSubmitSerializer(data=data)
+        assert s.is_valid(), f"错误：{s.errors}"
+        assert s.validated_data["size"] == "2880x1620"
+
+    # ── pixel 模式（向下兼容） ─────────────────────────────────────────────────
+
+    def test_pixel_mode_explicit_passes_through(self):
+        """TC-SER-05: size_mode=pixel 时 size 字段直通（AC-01-1）。"""
+        data = {**self._base(), "size_mode": "pixel", "size": "2048x2048"}
+        s = ImageGenerationSubmitSerializer(data=data)
+        assert s.is_valid(), f"错误：{s.errors}"
+        assert s.validated_data["size"] == "2048x2048"
+
+    def test_pixel_mode_invalid_size_returns_400(self):
+        """TC-SER-06: size_mode=pixel 配合非法 size → 400 ValidationError（AC-01-2）。"""
+        data = {**self._base(), "size_mode": "pixel", "size": "999x999"}
+        s = ImageGenerationSubmitSerializer(data=data)
+        assert not s.is_valid()
+        assert "size" in s.errors
+
+    # ── 默认模式 ──────────────────────────────────────────────────────────────
+
+    def test_no_size_mode_defaults_to_pixel_and_2048x2048(self):
+        """TC-SER-07: 不传任何尺寸参数时，默认 pixel 模式 + 2048x2048。"""
+        s = ImageGenerationSubmitSerializer(data=self._base())
+        assert s.is_valid(), f"错误：{s.errors}"
+        assert s.validated_data["size"] == "2048x2048"
+
+    # ── 模型 steps 透传守卫 ─────────────────────────────────────────────────
+
+    def test_steps_field_allowed_through_serializer_for_50_lite(self):
+        """TC-SER-09（守卫）: model=5.0-lite 传 steps → Serializer 允许，Task 层白名单过滤。"""
+        data = {**self._base(), "model": "doubao-seedream-5-0-260128", "steps": 50}
+        s = ImageGenerationSubmitSerializer(data=data)
+        assert s.is_valid(), f"Serializer 不应过滤 steps，错误：{s.errors}"
+        # steps 在 validated_data 中存在（Serializer 层放行）
+        assert s.validated_data.get("steps") == 50

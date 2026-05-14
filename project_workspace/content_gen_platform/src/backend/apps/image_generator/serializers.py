@@ -3,16 +3,18 @@
 
 包含：
 - ImageGenerationSubmitSerializer: POST /api/v1/image/generate/ 请求体校验
-  含 n≤4 硬约束（OQ-4，满足 AC-04-5）和模型枚举校验（满足 AC-01-5）
+  含 n≤4 硬约束（OQ-4，满足 AC-04-5）、模型枚举校验（满足 AC-01-5）
+  以及 v1.2 新增的三模式尺寸归一化（size_mode / size_tier / size_ratio）
 - ImageBatchSerializer: 批次详情序列化（含关联请求列表）
 - ImageBatchListSerializer: 批次列表序列化（不含请求详情，减少响应体大小）
 - ImageGenerationRequestSerializer: 请求记录序列化
 - ImageGenerationStatusSerializer: 状态查询响应序列化
 
-关联需求：FR-2、FR-3、FR-5、OQ-4、AC-04-5、AC-01-5
+关联需求：FR-1.2、FR-2、FR-3、FR-5、OQ-4、AC-04-5、AC-01-5
 """
 from rest_framework import serializers
 from .models import ImageBatch, ImageGenerationRequest
+from .size_normalizer import PIXEL_VALID_SIZES, normalize_size
 
 
 class ImageGenerationSubmitSerializer(serializers.Serializer):
@@ -22,6 +24,7 @@ class ImageGenerationSubmitSerializer(serializers.Serializer):
     三层约束中的序列化器层（第一层）：
     - n max_value=4 → OQ-4 硬约束（AC-04-5）
     - model ChoiceField → 枚举校验（AC-01-5）
+    - size 三模式归一化 → v1.2 新增（FR-1.2）
     前端（第二层）和 DB CheckConstraint（第三层）共同构成三层防护。
     """
 
@@ -30,7 +33,6 @@ class ImageGenerationSubmitSerializer(serializers.Serializer):
         "doubao-seedream-4-5-251128",
         "doubao-seedream-4-0-250828",
     ]
-    SUPPORTED_SIZES = ["2048x2048", "2880x1620", "1620x2880"]
 
     prompt = serializers.CharField(
         min_length=1,
@@ -49,12 +51,34 @@ class ImageGenerationSubmitSerializer(serializers.Serializer):
         default=1,
         help_text="生成张数 1-4（超过 4 张返回 400，AC-04-5）",
     )
-    size = serializers.ChoiceField(
-        choices=SUPPORTED_SIZES,
-        default="2048x2048",
-        help_text="图片尺寸",
+
+    # ── v1.2 尺寸三模式字段 ────────────────────────────────────────────────────
+    size_mode = serializers.ChoiceField(
+        choices=["pixel", "tier", "ratio"],
+        default="pixel",
+        required=False,
+        help_text="尺寸输入方式：pixel（像素精确）/ tier（档位）/ ratio（比例×档位组合）",
     )
-    # 高级参数（折叠面板，OQ-2，不传则不透传给 Ark）
+    size = serializers.ChoiceField(
+        choices=sorted(PIXEL_VALID_SIZES),
+        default="2048x2048",
+        required=False,
+        help_text="size_mode=pixel 时使用，像素精确尺寸字符串（如 '2048x2048'）",
+    )
+    size_tier = serializers.ChoiceField(
+        choices=["2K", "3K", "4K"],
+        default="2K",
+        required=False,
+        help_text="size_mode=tier 时使用档位名；size_mode=ratio 时与 size_ratio 联合决定像素（默认 2K）",
+    )
+    size_ratio = serializers.ChoiceField(
+        choices=["1:1", "16:9", "9:16", "4:3", "3:4"],
+        default="1:1",
+        required=False,
+        help_text="size_mode=ratio 时使用，比例字符串；必须配合 size_tier 使用",
+    )
+
+    # ── 高级参数（折叠面板，OQ-2，不传则不透传给 Ark） ─────────────────────────
     seed = serializers.IntegerField(
         required=False,
         allow_null=True,
@@ -69,17 +93,34 @@ class ImageGenerationSubmitSerializer(serializers.Serializer):
     guidance_scale = serializers.FloatField(
         required=False,
         allow_null=True,
-        help_text="CFG Scale（可选）",
+        help_text="CFG Scale（可选，默认 7.5）",
     )
     steps = serializers.IntegerField(
         required=False,
         allow_null=True,
-        help_text="推理步数（可选，4.0/4.5 支持）",
+        help_text="推理步数（可选，4.0/4.5 支持；5.0 Lite 由 Task 层白名单过滤）",
     )
     watermark = serializers.BooleanField(
         required=False,
         help_text="是否添加水印（未传则不透传给 Ark，使用模型默认行为）",
     )
+
+    def validate(self, data):
+        """
+        归一化 size，将三种输入方式统一为 validated_data['size']。
+        ratio 模式下 size_tier 参与计算（默认 2K）。
+        """
+        try:
+            normalized = normalize_size(
+                size_mode=data.get("size_mode", "pixel"),
+                size=data.get("size", "2048x2048"),
+                size_tier=data.get("size_tier", "2K"),
+                size_ratio=data.get("size_ratio", "1:1"),
+            )
+        except ValueError as e:
+            raise serializers.ValidationError({"size": str(e)})
+        data["size"] = normalized
+        return data
 
     def get_advanced_params(self) -> dict:
         """

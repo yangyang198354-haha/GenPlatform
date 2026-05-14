@@ -228,6 +228,110 @@ class TestDoubaoImageClientAdvancedParams:
         assert "doubao-seedream-4-0-250828" in SUPPORTED_MODELS
         assert len(SUPPORTED_MODELS) == 3
 
+    # ── v1.2 Canary 守卫测试（防止关键参数默认值漂移）──────────────────────────
+
+    def test_canary_model_50_lite_steps_not_in_whitelist(self):
+        """
+        【Canary 守卫 TC-CLIENT-01】5.0-lite 的 MODEL_ADVANCED_PARAMS 中不含 steps。
+
+        如果有人错误地在白名单中加入 steps，此测试会立即报警。
+        """
+        params_50_lite = MODEL_ADVANCED_PARAMS.get("doubao-seedream-5-0-260128", set())
+        assert "steps" not in params_50_lite, (
+            "5.0-lite 不支持 steps，MODEL_ADVANCED_PARAMS 中不应包含，"
+            "如需修改请同步更新文档和测试"
+        )
+
+    def test_canary_model_45_steps_in_whitelist(self):
+        """
+        【Canary 守卫 TC-CLIENT-02】4.5 的 MODEL_ADVANCED_PARAMS 应包含 steps。
+
+        如果有人错误地从白名单移除 steps，此测试会立即报警。
+        """
+        params_45 = MODEL_ADVANCED_PARAMS.get("doubao-seedream-4-5-251128", set())
+        assert "steps" in params_45, (
+            "4.5 支持 steps，MODEL_ADVANCED_PARAMS 中应包含"
+        )
+
+    def test_canary_guidance_scale_in_all_models(self):
+        """
+        【Canary 守卫 TC-CLIENT-03】guidance_scale 应在所有模型的白名单中。
+        """
+        for model_id, params in MODEL_ADVANCED_PARAMS.items():
+            assert "guidance_scale" in params, (
+                f"模型 {model_id} 的 MODEL_ADVANCED_PARAMS 缺少 guidance_scale"
+            )
+
+    def test_canary_seed_in_all_models(self):
+        """
+        【Canary 守卫 TC-CLIENT-04】seed 应在所有模型的白名单中（复现能力守卫）。
+        """
+        for model_id, params in MODEL_ADVANCED_PARAMS.items():
+            assert "seed" in params, (
+                f"模型 {model_id} 的 MODEL_ADVANCED_PARAMS 缺少 seed（影响结果复现能力）"
+            )
+
+    def test_canary_watermark_in_all_models(self):
+        """
+        【Canary 守卫 TC-CLIENT-05】watermark 应在所有模型的白名单中。
+        """
+        for model_id, params in MODEL_ADVANCED_PARAMS.items():
+            assert "watermark" in params, (
+                f"模型 {model_id} 的 MODEL_ADVANCED_PARAMS 缺少 watermark"
+            )
+
+    def test_build_request_body_guidance_scale_passes_through(self):
+        """TC-CLIENT-06: guidance_scale=8.0 → 请求体含 'guidance_scale': 8.0。"""
+        client = _make_client()
+        body = client._build_request_body(
+            prompt="test",
+            model="doubao-seedream-4-5-251128",
+            n=1,
+            size="2048x2048",
+            ref_image_b64=None,
+            advanced_params={"guidance_scale": 8.0},
+        )
+        assert body.get("guidance_scale") == 8.0
+
+    def test_build_request_body_seed_passes_through(self):
+        """TC-CLIENT-07: seed=12345 → 请求体含 'seed': 12345（复现能力守卫）。"""
+        client = _make_client()
+        body = client._build_request_body(
+            prompt="test",
+            model="doubao-seedream-4-5-251128",
+            n=1,
+            size="2048x2048",
+            ref_image_b64=None,
+            advanced_params={"seed": 12345},
+        )
+        assert body.get("seed") == 12345
+
+    def test_build_request_body_watermark_true_passes_through(self):
+        """TC-CLIENT-08: watermark=True → 请求体含 'watermark': True。"""
+        client = _make_client()
+        body = client._build_request_body(
+            prompt="test",
+            model="doubao-seedream-4-5-251128",
+            n=1,
+            size="2048x2048",
+            ref_image_b64=None,
+            advanced_params={"watermark": True},
+        )
+        assert body.get("watermark") is True
+
+    def test_build_request_body_size_field_always_present(self):
+        """TC-CLIENT-09: 请求体始终包含 size 字段（PR #7 教训：不能省略）。"""
+        client = _make_client()
+        body = client._build_request_body(
+            prompt="test",
+            model="doubao-seedream-4-5-251128",
+            n=1,
+            size="3840x2160",
+            ref_image_b64=None,
+            advanced_params={},
+        )
+        assert body.get("size") == "3840x2160"
+
 
 # ── 错误处理测试（ADR-07）───────────────────────────────────────────────────
 
