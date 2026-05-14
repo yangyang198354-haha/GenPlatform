@@ -141,7 +141,7 @@
                 <p>输入提示词后点击「开始生成」</p>
               </div>
 
-              <!-- 生成中 -->
+              <!-- 生成中（v1.2.1 BUG-03：无取消按钮，失败后直接重试） -->
               <div v-else-if="isGenerating" class="result-progress">
                 <div class="progress-animation">
                   <el-icon class="spinning-icon"><Loading /></el-icon>
@@ -176,11 +176,22 @@
                 </div>
               </div>
 
-              <!-- 失败 -->
+              <!-- 失败（v1.2.1 BUG-03：常驻 ElAlert + 重新生成按钮） -->
               <div v-else-if="generationError" class="result-error">
-                <el-icon class="error-icon"><CircleClose /></el-icon>
-                <p class="error-text">生成失败：{{ generationError }}</p>
-                <el-button @click="resetGeneration">重试</el-button>
+                <el-alert
+                  :title="`生成失败：${generationError}`"
+                  type="error"
+                  :closable="false"
+                  show-icon
+                  class="error-alert"
+                />
+                <el-button
+                  type="primary"
+                  style="margin-top: 16px"
+                  @click="resetGeneration"
+                >
+                  重新生成
+                </el-button>
               </div>
             </el-card>
           </div>
@@ -246,6 +257,13 @@ const doubaoIsConfigured = ref(true)  // 默认 true，避免首次加载时闪�
 // WebSocket
 let ws = null
 
+// v1.2.1 BUG-03：超时保护定时器 + HTTP 轮询定时器
+let generationTimer = null   // 5 分钟超时保护
+let pollingTimer = null      // HTTP 轮询（WebSocket 不可用时降级）
+
+const GENERATION_TIMEOUT_MS = 5 * 60 * 1000  // 5 分钟（Ark API 通常 30s 内返回）
+const POLLING_INTERVAL_MS = 3000              // 轮询间隔 3 秒
+
 const batchProgress = computed(() => {
   if (!currentBatch.value) return 0
   return Math.round((completedImages.value.length / (currentBatch.value.total_count || 1)) * 100)
@@ -261,7 +279,69 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (ws) ws.close()
+  // v1.2.1 BUG-03：组件销毁时清理定时器，防止内存泄漏
+  _clearGenerationTimers()
 })
+
+// ── v1.2.1 BUG-03：定时器清理工具函数 ──────────────────────────────────────────
+const _clearGenerationTimers = () => {
+  if (generationTimer) {
+    clearTimeout(generationTimer)
+    generationTimer = null
+  }
+  if (pollingTimer) {
+    clearInterval(pollingTimer)
+    pollingTimer = null
+  }
+}
+
+// ── v1.2.1 BUG-03c：HTTP 轮询降级（WebSocket 不可用时启动）──────────────────────
+const startPolling = (batchId) => {
+  if (pollingTimer) return  // 防止重复启动
+  pollingTimer = setInterval(async () => {
+    if (!isGenerating.value) {
+      stopPolling()
+      return
+    }
+    try {
+      const { data } = await imageAPI.getBatchDetail(batchId)
+      // 同步已完成图片列表（从 requests 提取 completed 条目）
+      const completed = (data.requests || []).filter((r) => r.status === 'completed')
+      completedImages.value = completed.map((r) => ({
+        request_id: r.id,
+        file_url: r.thumbnail_url || r.result_image_url || '',
+        media_item_id: r.media_item_id,
+      }))
+      // 批次进入最终态：停止轮询，重置状态
+      if (['completed', 'partial_failed', 'failed'].includes(data.status)) {
+        _clearGenerationTimers()
+        isGenerating.value = false
+        if (data.status === 'failed') {
+          generationError.value = '图片生成失败，请重试'
+          ElMessage({
+            type: 'error',
+            message: '图片生成失败，请重试',
+            duration: 0,
+            showClose: true,
+          })
+        } else if (data.status === 'partial_failed') {
+          ElMessage.warning(`批次部分完成：${completedImages.value.length} 张成功，请检查失败原因`)
+        } else {
+          ElMessage.success(`${completedImages.value.length} 张图片已全部生成完成，已自动保存到素材库！`)
+        }
+      }
+    } catch {
+      // 轮询单次失败不终止（网络抖动），等下次继续
+    }
+  }, POLLING_INTERVAL_MS)
+}
+
+const stopPolling = () => {
+  if (pollingTimer) {
+    clearInterval(pollingTimer)
+    pollingTimer = null
+  }
+}
 
 /**
  * 查询 doubao_image 服务配置状态（FR-7.1，ADR-09）。
@@ -288,8 +368,11 @@ const connectWebSocket = () => {
     const msg = JSON.parse(event.data)
     handleWebSocketMessage(msg)
   }
+  // v1.2.1 BUG-03c：WebSocket 不可用时降级到 HTTP 轮询
   ws.onerror = () => {
-    // WebSocket 不可用时，依赖轮询状态接口（NFR-2）
+    if (currentBatch.value && isGenerating.value) {
+      startPolling(currentBatch.value.batch_id)
+    }
   }
 }
 
@@ -300,7 +383,7 @@ const handleWebSocketMessage = (msg) => {
   if (payload.batch_id !== currentBatch.value.batch_id) return
 
   if (event_type === 'batch_progress') {
-    // 批次开始处理
+    // 批次开始处理（无需额外操作）
   }
 
   if (event_type === 'image_completed') {
@@ -313,21 +396,39 @@ const handleWebSocketMessage = (msg) => {
     ElMessage.success(`第 ${completedImages.value.length} 张图片已生成`)
   }
 
+  // v1.2.1 BUG-03b 修复：image_failed 必须重置 isGenerating + 持久错误（duration:0）
   if (event_type === 'image_failed') {
-    generationError.value = payload.error || '图片生成失败'
-    ElMessage.error(`图片生成失败：${payload.error}`)
+    const errMsg = payload.error || '图片生成失败'
+    generationError.value = errMsg
+    isGenerating.value = false          // 修复：原来漏掉了 isGenerating 重置
+    completedImages.value = []          // 进度条归零
+    _clearGenerationTimers()
+    ElMessage({
+      type: 'error',
+      message: `图片生成失败：${errMsg}`,
+      duration: 0,         // v1.2.1 BUG-03a 修复：持久展示（原默认 3000ms）
+      showClose: true,
+    })
   }
 
   if (event_type === 'batch_completed') {
+    _clearGenerationTimers()    // v1.2.1：清理超时保护定时器
     isGenerating.value = false
-    const { status } = payload
-    if (status === 'completed') {
+    const batchStatus = payload.status
+    if (batchStatus === 'completed') {
       ElMessage.success(`${completedImages.value.length} 张图片已全部生成完成，已自动保存到素材库！`)
-    } else if (status === 'partial_failed') {
+    } else if (batchStatus === 'partial_failed') {
       ElMessage.warning(`批次部分完成：${completedImages.value.length} 张成功，请检查失败原因`)
     } else {
-      isGenerating.value = false
+      // v1.2.1 BUG-03b 修复：batch_completed[failed] 也要重置 completedImages 并持久展示错误
       generationError.value = '所有图片生成失败，请稍后重试'
+      completedImages.value = []
+      ElMessage({
+        type: 'error',
+        message: '所有图片生成失败，请稍后重试',
+        duration: 0,
+        showClose: true,
+      })
     }
   }
 }
@@ -377,6 +478,8 @@ const submitGeneration = async () => {
     return
   }
 
+  // v1.2.1：新提交时清理上一次的定时器（防止残留超时定时器干扰新请求）
+  _clearGenerationTimers()
   isGenerating.value = true
   completedImages.value = []
   generationError.value = ''
@@ -419,10 +522,31 @@ const submitGeneration = async () => {
       batch_name: data.batch_name,
       total_count: data.total_count,
     }
+
+    // v1.2.1 BUG-03b：5 分钟超时保护（POST 成功后启动）
+    // Ark API 通常 30s 内返回，5min 是安全边界，防止 isGenerating 永久为 true
+    generationTimer = setTimeout(() => {
+      if (isGenerating.value) {
+        isGenerating.value = false
+        completedImages.value = []
+        generationError.value = '生成超时，请检查网络连接后重试'
+        ElMessage({
+          type: 'warning',
+          message: '生成超时，已自动重置状态，请重试',
+          duration: 0,
+          showClose: true,
+        })
+      }
+    }, GENERATION_TIMEOUT_MS)
   } catch (err) {
+    // v1.2.1 BUG-03b：POST 失败路径统一重置状态（场景 B）
     isGenerating.value = false
+    completedImages.value = []    // 进度条归零
+    _clearGenerationTimers()
     const errorCode = err.response?.data?.error || ''
     const errMsg = err.response?.data?.detail || err.response?.data?.error || '提交失败，请检查豆包 API Key 是否已配置'
+
+    generationError.value = errMsg
 
     // ARK_KEY_INVALID 或未配置类错误：提供"前往配置"可点击提示（FR-7.2，US-08 AC-08-3）
     const isKeyError = ['ARK_KEY_INVALID', 'DOUBAO_IMAGE_NOT_CONFIGURED'].includes(errorCode) ||
@@ -440,14 +564,19 @@ const submitGeneration = async () => {
         router.push({ path: '/settings', query: { tab: 'doubao_image' } })
       }).catch(() => {/* 用户选择稍后，忽略 */})
     } else {
-      ElMessage.error(errMsg)
+      // v1.2.1 BUG-03a 修复：POST 失败错误信息持久展示（duration:0，showClose:true）
+      ElMessage({
+        type: 'error',
+        message: errMsg,
+        duration: 0,
+        showClose: true,
+      })
     }
-
-    generationError.value = errMsg
   }
 }
 
 const resetGeneration = () => {
+  _clearGenerationTimers()   // v1.2.1：清理超时保护和轮询定时器
   currentBatch.value = null
   completedImages.value = []
   generationError.value = ''
@@ -698,22 +827,15 @@ const downloadImage = (url) => {
   opacity: 1;
 }
 
+/* v1.2.1 BUG-03a：result-error 使用 ElAlert 常驻展示，布局调整 */
 .result-error {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  padding: 60px 40px;
-  color: var(--el-color-danger);
+  align-items: stretch;
+  padding: 40px;
 }
 
-.error-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
-}
-
-.error-text {
-  font-size: 14px;
-  margin-bottom: 16px;
-  text-align: center;
+.error-alert {
+  text-align: left;
 }
 </style>
