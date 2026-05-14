@@ -18,22 +18,24 @@ def create_media_item_from_url(
     media_type: str,
     source: str = "ai_generated",
     title: str = "",
+    provider: str = "",
 ) -> MediaItem:
     """
-    Download a file from `url` and create a MediaItem for `user`.
+    从远程 URL 下载文件并为用户创建 MediaItem 记录。
 
-    Args:
-        user: User instance (owner)
-        url: Remote URL to download from
+    参数：
+        user: 用户实例（所有者）
+        url: 远程文件 URL
         media_type: 'image' | 'video' | 'audio'
         source: 'ai_generated' | 'uploaded'
-        title: Human-readable title (defaults to UUID if empty)
+        title: 可读标题（为空时自动生成）
+        provider: 生成来源标识，如 'doubao'；为空表示历史即梦数据或上传（FR-4）
 
-    Returns:
-        Newly created MediaItem instance.
+    返回：
+        新创建的 MediaItem 实例
 
-    Raises:
-        RuntimeError: if download fails.
+    异常：
+        RuntimeError: 下载失败时抛出
     """
     if not title:
         title = f"ai_{media_type}_{uuid.uuid4().hex[:8]}"
@@ -78,8 +80,8 @@ def create_media_item_from_url(
     item.file.save(filename, ContentFile(content), save=True)
 
     logger.info(
-        "Created MediaItem id=%d for user=%s type=%s source=%s",
-        item.pk, user.pk, media_type, source,
+        "已创建 MediaItem id=%d，用户=%s，类型=%s，来源=%s，provider=%s",
+        item.pk, user.pk, media_type, source, provider or "（无）",
     )
     return item
 

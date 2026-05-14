@@ -64,5 +64,20 @@
     <security_event time="2026-05-10T00:10:00Z" type="AGENT_INVOKE" action="Invoke sub_agent_system_architect (PF-GROUP_B) — 生成 architecture_design.md, module_design.md, tech_stack.md" result="SUCCESS"/>
     <security_event time="2026-05-10T00:25:00Z" type="GATE_REVIEW" action="Gate review PF-GROUP_B" result="PASS — 5 ADRs(每个≥3选项), 10 脚本模块(无循环依赖), 接口类型化完整"/>
     <security_event time="2026-05-10T00:25:00Z" type="PM_STATE_TRANSITION" action="PM_GATE_PASS → PM_AWAIT_USER_CONFIRM" result="等待用户确认后进入编码阶段"/>
+    <!-- PARTIAL_FLOW-TEST-DOUBAO-001 事件 -->
+    <security_event time="2026-05-13T00:00:00Z" type="PM_PARTIAL_FLOW_INIT" action="PARTIAL_FLOW 启动 — 豆包图片迁移测试阶段，范围: GROUP_D" result="SUCCESS"/>
+    <security_event time="2026-05-13T00:00:00Z" type="AGENT_INVOKE" action="Invoke sub_agent_test_engineer — 豆包图片迁移功能测试" result="IN_PROGRESS"/>
+    <security_event time="2026-05-13T01:00:00Z" type="AGENT_RESPONSE" action="test_engineer 完成：test_plan.md + 24 client 测试 + 24 serializer 测试 + 18 model 测试 + 26 view 测试 + 9 task 测试 + integration stub" result="AWAITING_GATE_REVIEW"/>
   </audit_log>
+
+  <!-- PARTIAL_FLOW: 豆包图片迁移测试 (2026-05-13) -->
+  <partial_flow id="PARTIAL_FLOW-TEST-DOUBAO-001" flow_mode="PARTIAL_FLOW"
+    scope="GROUP_D — 豆包 Seedream 图片生成接入测试"
+    started_at="2026-05-13T00:00:00Z"
+    overall_status="AWAITING_GATE_REVIEW">
+    <phase_group id="PF-D-GROUP_D" phases="PHASE_07,PHASE_08,PHASE_09" owner="sub_agent_test_engineer"
+      status="AWAITING_REVIEW" retry_count="0"
+      output_files="docs/testing/doubao_image_migration/test_plan.md, docs/testing/doubao_image_migration/unit_test_report.md, docs/testing/doubao_image_migration/integration_test_report.md, apps/image_generator/tests/test_serializers.py, apps/image_generator/tests/test_integration.py"
+      completed_at="2026-05-13T01:00:00Z"/>
+  </partial_flow>
 </phase_status_doc>
