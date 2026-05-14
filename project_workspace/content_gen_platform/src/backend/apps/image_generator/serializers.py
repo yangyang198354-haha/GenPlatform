@@ -26,9 +26,9 @@ class ImageGenerationSubmitSerializer(serializers.Serializer):
     """
 
     SUPPORTED_MODELS = [
-        "Doubao-Seedream-5.0-lite",
-        "Doubao-Seedream-4.5",
-        "Doubao-Seedream-4.0",
+        "doubao-seedream-5-0-260128",
+        "doubao-seedream-4-5-251128",
+        "doubao-seedream-4-0-250828",
     ]
     SUPPORTED_SIZES = ["1024x1024", "1280x720", "720x1280"]
 
@@ -39,7 +39,7 @@ class ImageGenerationSubmitSerializer(serializers.Serializer):
     )
     model = serializers.ChoiceField(
         choices=SUPPORTED_MODELS,
-        default="Doubao-Seedream-4.5",
+        default="doubao-seedream-4-5-251128",
         help_text="豆包模型版本（AC-01-5：不在枚举中则返回 400）",
     )
     # OQ-4 硬约束：n 的 max_value=4（AC-04-5）

@@ -30,7 +30,7 @@ class TestImageGenerationSubmitView:
             mock_task.delay = MagicMock()
             resp = client.post(
                 "/api/v1/image/generate/",
-                {"prompt": "日落时分的海边灯塔", "model": "Doubao-Seedream-4.5", "n": 1},
+                {"prompt": "日落时分的海边灯塔", "model": "doubao-seedream-4-5-251128", "n": 1},
                 format="json",
             )
         assert resp.status_code == status.HTTP_202_ACCEPTED
@@ -46,7 +46,7 @@ class TestImageGenerationSubmitView:
             mock_task.delay = MagicMock()
             resp = client.post(
                 "/api/v1/image/generate/",
-                {"prompt": "测试提示词", "model": "Doubao-Seedream-4.5", "n": 2},
+                {"prompt": "测试提示词", "model": "doubao-seedream-4-5-251128", "n": 2},
                 format="json",
             )
         assert resp.status_code == status.HTTP_202_ACCEPTED
@@ -69,7 +69,7 @@ class TestImageGenerationSubmitView:
         client, _ = auth_client
         resp = client.post(
             "/api/v1/image/generate/",
-            {"prompt": "test", "model": "Doubao-Seedream-4.5", "n": 5},
+            {"prompt": "test", "model": "doubao-seedream-4-5-251128", "n": 5},
             format="json",
         )
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
@@ -95,7 +95,7 @@ class TestImageGenerationSubmitView:
             mock_task.delay = MagicMock()
             resp = client.post(
                 "/api/v1/image/generate/",
-                {"prompt": "测试图生图", "model": "Doubao-Seedream-4.5", "ref_image": fake_img},
+                {"prompt": "测试图生图", "model": "doubao-seedream-4-5-251128", "ref_image": fake_img},
                 format="multipart",
             )
         assert resp.status_code == status.HTTP_202_ACCEPTED
@@ -125,7 +125,7 @@ class TestImageGenerationSubmitView:
             mock_task.delay = MagicMock()
             client.post(
                 "/api/v1/image/generate/",
-                {"prompt": "test", "model": "Doubao-Seedream-4.5"},
+                {"prompt": "test", "model": "doubao-seedream-4-5-251128"},
                 format="json",
             )
             mock_task.delay.assert_called_once()
@@ -140,7 +140,7 @@ class TestImageGenerationSubmitView:
             mock_task.delay = MagicMock()
             resp = client.post(
                 "/api/v1/image/generate/",
-                {"prompt": "日落时分的海边灯塔", "model": "Doubao-Seedream-4.5"},
+                {"prompt": "日落时分的海边灯塔", "model": "doubao-seedream-4-5-251128"},
                 format="json",
             )
         assert resp.status_code == status.HTTP_202_ACCEPTED
@@ -156,7 +156,7 @@ class TestImageGenerationSubmitView:
             mock_task.delay = MagicMock()
             resp = client.post(
                 "/api/v1/image/generate/",
-                {"prompt": "test", "model": "Doubao-Seedream-4.5"},
+                {"prompt": "test", "model": "doubao-seedream-4-5-251128"},
                 format="json",
             )
         batch_id = resp.data["batch_id"]
@@ -216,7 +216,7 @@ class TestImageBatchListView:
         return ImageBatch.objects.create(
             user=user,
             name=name,
-            model="Doubao-Seedream-4.5",
+            model="doubao-seedream-4-5-251128",
             prompt="test",
             total_count=1,
             status="completed",
@@ -255,7 +255,7 @@ class TestImageBatchDetailView:
         return ImageBatch.objects.create(
             user=user,
             name="原始名称",
-            model="Doubao-Seedream-4.5",
+            model="doubao-seedream-4-5-251128",
             prompt="test",
             total_count=1,
             status=status,
@@ -340,7 +340,7 @@ class TestImageBatchDetailView:
 
         req = ImageGenerationRequest.objects.create(
             user=user, batch=batch, prompt="test",
-            model="Doubao-Seedream-4.5", provider="doubao",
+            model="doubao-seedream-4-5-251128", provider="doubao",
             media_item=media, status="completed",
         )
 

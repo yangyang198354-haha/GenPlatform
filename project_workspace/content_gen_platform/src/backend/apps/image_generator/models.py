@@ -37,7 +37,7 @@ class ImageBatch(models.Model):
     model = models.CharField(
         max_length=64,
         verbose_name="豆包模型版本",
-        help_text="如 Doubao-Seedream-4.5",
+        help_text="Ark model ID，如 doubao-seedream-4-5-251128",
     )
     prompt = models.TextField(verbose_name="提示词")
     is_img2img = models.BooleanField(default=False, verbose_name="是否图生图")

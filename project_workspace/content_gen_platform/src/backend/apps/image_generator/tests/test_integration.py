@@ -85,7 +85,7 @@ class TestImageGenerationEndToEnd:
         # 触发 POST（Celery TASK_ALWAYS_EAGER 模式，任务同步执行）
         resp = client.post(
             "/api/v1/image/generate/",
-            {"prompt": "集成测试提示词", "model": "Doubao-Seedream-4.5", "n": 1},
+            {"prompt": "集成测试提示词", "model": "doubao-seedream-4-5-251128", "n": 1},
             format="json",
         )
 
@@ -137,7 +137,7 @@ class TestImageGenerationEndToEnd:
 
         resp = client.post(
             "/api/v1/image/generate/",
-            {"prompt": "批量集成测试", "model": "Doubao-Seedream-4.5", "n": 4},
+            {"prompt": "批量集成测试", "model": "doubao-seedream-4-5-251128", "n": 4},
             format="json",
         )
         assert resp.status_code == 202
@@ -166,7 +166,7 @@ class TestMigrationIntegrity:
         batch = ImageBatch.objects.create(
             user=user,
             name="迁移验证批次",
-            model="Doubao-Seedream-4.5",
+            model="doubao-seedream-4-5-251128",
             prompt="迁移测试",
             total_count=2,
             status="pending",
@@ -174,7 +174,7 @@ class TestMigrationIntegrity:
         batch.refresh_from_db()
         assert batch.pk is not None
         assert batch.name == "迁移验证批次"
-        assert batch.model == "Doubao-Seedream-4.5"
+        assert batch.model == "doubao-seedream-4-5-251128"
         assert batch.is_img2img is False
         assert batch.total_count == 2
         assert batch.completed_count == 0
@@ -182,17 +182,17 @@ class TestMigrationIntegrity:
     def test_imagegenerationrequest_new_fields(self, user):
         """ImageGenerationRequest 的新字段（batch/model/provider）可正常操作。"""
         batch = ImageBatch.objects.create(
-            user=user, name="test", model="Doubao-Seedream-4.5",
+            user=user, name="test", model="doubao-seedream-4-5-251128",
             prompt="test", total_count=1,
         )
         req = ImageGenerationRequest.objects.create(
             user=user, batch=batch,
-            prompt="test", model="Doubao-Seedream-4.5",
+            prompt="test", model="doubao-seedream-4-5-251128",
             provider="doubao",
         )
         req.refresh_from_db()
         assert req.batch_id == batch.pk
-        assert req.model == "Doubao-Seedream-4.5"
+        assert req.model == "doubao-seedream-4-5-251128"
         assert req.provider == "doubao"
 
     def test_check_constraint_in_postgres(self, user):
@@ -207,6 +207,6 @@ class TestMigrationIntegrity:
         with pytest.raises((IntegrityError, Exception)):
             with transaction.atomic():
                 ImageBatch.objects.create(
-                    user=user, name="bad", model="Doubao-Seedream-4.5",
+                    user=user, name="bad", model="doubao-seedream-4-5-251128",
                     prompt="test", total_count=5,
                 )

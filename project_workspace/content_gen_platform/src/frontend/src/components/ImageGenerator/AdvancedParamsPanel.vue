@@ -96,7 +96,7 @@ const props = defineProps({
   },
   selectedModel: {
     type: String,
-    default: 'Doubao-Seedream-4.5',
+    default: 'doubao-seedream-4-5-251128',
   },
   disabled: {
     type: Boolean,
@@ -120,7 +120,7 @@ const params = ref({
 
 // 5.0-lite 不支持 steps（ADR-05）
 const modelSupportsSteps = computed(() => {
-  return props.selectedModel !== 'Doubao-Seedream-5.0-lite'
+  return props.selectedModel !== 'doubao-seedream-5-0-260128'
 })
 
 // 判断是否设置了任何非默认值

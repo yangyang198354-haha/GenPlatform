@@ -38,7 +38,7 @@ def _make_batch(user, n=1, is_img2img=False):
     batch = ImageBatch.objects.create(
         user=user,
         name="0513-1430 测试批次",
-        model="Doubao-Seedream-4.5",
+        model="doubao-seedream-4-5-251128",
         prompt="测试提示词",
         is_img2img=is_img2img,
         total_count=n,
@@ -50,7 +50,7 @@ def _make_batch(user, n=1, is_img2img=False):
             user=user,
             batch=batch,
             prompt="测试提示词",
-            model="Doubao-Seedream-4.5",
+            model="doubao-seedream-4-5-251128",
             provider="doubao",
             status="pending",
         )
