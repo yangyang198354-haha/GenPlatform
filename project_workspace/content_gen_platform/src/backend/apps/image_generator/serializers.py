@@ -137,7 +137,14 @@ class ImageGenerationSubmitSerializer(serializers.Serializer):
 
 
 class ImageGenerationRequestSerializer(serializers.ModelSerializer):
-    """ImageGenerationRequest 基础序列化器。"""
+    """
+    ImageGenerationRequest 基础序列化器。
+
+    v1.2.1 新增：
+    - thumbnail_url (SerializerMethodField): 优先返回 MediaItem.file.url（持久 URL），
+      降级到 result_image_url（Ark CDN，约 24h 有效），两者均空则返回 ""。
+    - result_image_url 显式暴露（原来字段存在但未在 fields 中声明）。
+    """
 
     media_item_id = serializers.PrimaryKeyRelatedField(
         source="media_item", read_only=True
@@ -145,6 +152,8 @@ class ImageGenerationRequestSerializer(serializers.ModelSerializer):
     batch_id = serializers.PrimaryKeyRelatedField(
         source="batch", read_only=True
     )
+    # v1.2.1 BUG-01：新增 thumbnail_url，两层降级逻辑（见 get_thumbnail_url）
+    thumbnail_url = serializers.SerializerMethodField()
 
     class Meta:
         model = ImageGenerationRequest
@@ -157,10 +166,30 @@ class ImageGenerationRequestSerializer(serializers.ModelSerializer):
             "model",
             "batch_id",
             "media_item_id",
+            "result_image_url",   # v1.2.1：显式暴露（向后兼容，原字段已存在）
+            "thumbnail_url",      # v1.2.1：新增，优先持久 URL
             "error_message",
             "created_at",
         )
         read_only_fields = fields
+
+    def get_thumbnail_url(self, obj):
+        """
+        优先返回已入库的 MediaItem.file.url（持久存储，不过期）。
+        若 MediaItem 不存在或 URL 构建失败，降级到 result_image_url（Ark CDN，约 24h 有效）。
+        两者均空时返回空字符串（不报错，向后兼容历史即梦数据）。
+
+        BUG-01 修复（v1.2.1）。
+        """
+        try:
+            if obj.media_item and obj.media_item.file:
+                request = self.context.get("request")
+                if request:
+                    return request.build_absolute_uri(obj.media_item.file.url)
+                return obj.media_item.file.url
+        except Exception:
+            pass
+        return obj.result_image_url or ""
 
 
 class ImageGenerationStatusSerializer(serializers.ModelSerializer):

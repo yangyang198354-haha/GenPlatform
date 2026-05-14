@@ -263,11 +263,17 @@ class ImageBatchDetailView(APIView):
             return None
 
     def get(self, request, pk):
-        """获取批次详情（含图片列表，AC-05-2）。"""
+        """
+        获取批次详情（含图片列表，AC-05-2）。
+
+        v1.2.1 BUG-01：传入 context={"request": request}，使
+        ImageGenerationRequestSerializer.get_thumbnail_url() 能通过
+        request.build_absolute_uri() 构建完整的持久图片 URL。
+        """
         batch = self._get_batch(pk, request.user)
         if batch is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
-        serializer = ImageBatchSerializer(batch)
+        serializer = ImageBatchSerializer(batch, context={"request": request})
         return Response(serializer.data)
 
     def patch(self, request, pk):

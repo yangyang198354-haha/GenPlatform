@@ -343,3 +343,147 @@ class TestSubmitSerializerSizeModeV12:
         assert s.is_valid(), f"Serializer 不应过滤 steps，错误：{s.errors}"
         # steps 在 validated_data 中存在（Serializer 层放行）
         assert s.validated_data.get("steps") == 50
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# v1.2.1 BUG-01 新增测试 — ImageGenerationRequestSerializer.thumbnail_url
+# ══════════════════════════════════════════════════════════════════════════════
+
+from unittest.mock import MagicMock, PropertyMock
+from apps.image_generator.serializers import ImageGenerationRequestSerializer
+
+
+def _make_req_obj(*, media_item=None, result_image_url="", req_id=1, req_status="completed"):
+    """
+    构造模拟的 ImageGenerationRequest（无需 DB）。
+    MagicMock 覆盖所有字段；测试只关注 media_item / result_image_url。
+    """
+    obj = MagicMock()
+    obj.pk = req_id
+    obj.id = req_id
+    obj.status = req_status
+    obj.prompt = "test prompt"
+    obj.progress = 100
+    obj.provider = "doubao"
+    obj.model = "doubao-seedream-4-5-251128"
+    obj.batch = MagicMock()
+    obj.batch.pk = 10
+    obj.media_item = media_item
+    obj.media_item_id = media_item.pk if media_item else None
+    obj.result_image_url = result_image_url
+    obj.error_message = ""
+    obj.created_at = "2026-05-15T00:00:00Z"
+    return obj
+
+
+def _make_media_item_mock(file_url="/media/images/1/test.jpg"):
+    """构造模拟的 MediaItem.file（FieldFile）。"""
+    mi = MagicMock()
+    mi.pk = 99
+    mi.file = MagicMock()
+    mi.file.url = file_url
+    return mi
+
+
+class TestImageGenerationRequestSerializerThumbnailUrl:
+    """
+    v1.2.1 BUG-01：ImageGenerationRequestSerializer.thumbnail_url 字段测试。
+
+    覆盖：
+      TC-SER-BUG01-01  media_item.file.url 优先（含 request context）
+      TC-SER-BUG01-02  media_item.file.url 优先（无 request context，返回相对路径）
+      TC-SER-BUG01-03  media_item=None 时降级到 result_image_url
+      TC-SER-BUG01-04  media_item.file=None 时降级到 result_image_url
+      TC-SER-BUG01-05  两者均空时返回 ""（不报错，向后兼容）
+      TC-SER-BUG01-06  media_item.file 访问异常时静默降级
+      TC-SER-BUG01-07  Canary：thumbnail_url 在 Meta.fields 中（防误删）
+      TC-SER-BUG01-08  Canary：result_image_url 在 Meta.fields 中（v1.2.1 显式暴露）
+    """
+
+    def test_thumbnail_url_uses_media_item_with_request_context(self):
+        """TC-SER-BUG01-01：有 media_item + request context → 返回 build_absolute_uri 结果。"""
+        mi = _make_media_item_mock()
+        obj = _make_req_obj(media_item=mi, result_image_url="https://ark.cdn/img.jpg")
+
+        mock_req = MagicMock()
+        mock_req.build_absolute_uri.return_value = "http://testserver/media/images/1/test.jpg"
+        serializer = ImageGenerationRequestSerializer(context={"request": mock_req})
+
+        result = serializer.get_thumbnail_url(obj)
+
+        mock_req.build_absolute_uri.assert_called_once_with("/media/images/1/test.jpg")
+        assert result == "http://testserver/media/images/1/test.jpg"
+
+    def test_thumbnail_url_uses_media_item_without_request_context(self):
+        """TC-SER-BUG01-02：有 media_item 但无 request context → 返回相对路径。"""
+        mi = _make_media_item_mock()
+        obj = _make_req_obj(media_item=mi, result_image_url="https://ark.cdn/img.jpg")
+        serializer = ImageGenerationRequestSerializer(context={})
+
+        result = serializer.get_thumbnail_url(obj)
+
+        assert result == "/media/images/1/test.jpg"
+
+    def test_thumbnail_url_fallback_when_media_item_none(self):
+        """TC-SER-BUG01-03：media_item=None → 降级返回 result_image_url。"""
+        obj = _make_req_obj(media_item=None, result_image_url="https://ark.cdn/generated.jpg")
+        serializer = ImageGenerationRequestSerializer(context={})
+
+        result = serializer.get_thumbnail_url(obj)
+
+        assert result == "https://ark.cdn/generated.jpg"
+
+    def test_thumbnail_url_fallback_when_media_item_file_is_none(self):
+        """TC-SER-BUG01-04：media_item.file=None → 降级返回 result_image_url。"""
+        mi = MagicMock()
+        mi.pk = 99
+        mi.file = None
+        obj = _make_req_obj(media_item=mi, result_image_url="https://ark.cdn/fallback.jpg")
+        serializer = ImageGenerationRequestSerializer(context={})
+
+        result = serializer.get_thumbnail_url(obj)
+
+        assert result == "https://ark.cdn/fallback.jpg"
+
+    def test_thumbnail_url_empty_string_when_both_null(self):
+        """TC-SER-BUG01-05：两者均空 → 返回 ""（不报错，向后兼容即梦历史数据）。"""
+        obj = _make_req_obj(media_item=None, result_image_url="")
+        serializer = ImageGenerationRequestSerializer(context={})
+
+        result = serializer.get_thumbnail_url(obj)
+
+        assert result == ""
+
+    def test_thumbnail_url_silent_fallback_on_exception(self):
+        """TC-SER-BUG01-06：media_item.file 访问抛异常 → 静默降级到 result_image_url。"""
+        mi = MagicMock()
+        mi.pk = 99
+        type(mi).file = PropertyMock(side_effect=Exception("storage error"))
+        obj = _make_req_obj(media_item=mi, result_image_url="https://ark.cdn/safe.jpg")
+        serializer = ImageGenerationRequestSerializer(context={})
+
+        result = serializer.get_thumbnail_url(obj)
+
+        assert result == "https://ark.cdn/safe.jpg"
+
+    def test_canary_thumbnail_url_in_meta_fields(self):
+        """
+        TC-SER-BUG01-07（Canary 守卫）：
+        thumbnail_url 必须在 ImageGenerationRequestSerializer.Meta.fields 中。
+        防止重构时误删（v1.2.1 BUG-01 核心修复字段）。
+        """
+        fields = ImageGenerationRequestSerializer.Meta.fields
+        assert "thumbnail_url" in fields, (
+            "Canary 守卫：ImageGenerationRequestSerializer.Meta.fields 缺少 'thumbnail_url'。"
+            "v1.2.1 BUG-01 修复依赖此字段，如需移除请先评估影响。"
+        )
+
+    def test_canary_result_image_url_in_meta_fields(self):
+        """
+        TC-SER-BUG01-08：result_image_url 必须在 Meta.fields 中（v1.2.1 显式暴露）。
+        """
+        fields = ImageGenerationRequestSerializer.Meta.fields
+        assert "result_image_url" in fields, (
+            "result_image_url 未在 ImageGenerationRequestSerializer.Meta.fields 中声明。"
+            "v1.2.1 BUG-01 要求该字段暴露给前端（降级链第二层）。"
+        )

@@ -37,15 +37,26 @@
         <strong>提示词：</strong>{{ batch.prompt }}
       </div>
 
-      <!-- 图片缩略图网格（AC-05-2）-->
-      <div class="image-grid" v-if="completedRequests.length > 0">
+      <!-- 图片缩略图网格（AC-05-2，v1.2.1 BUG-01 修复）-->
+      <div class="image-grid" v-if="completedRequests.length > 0 || failedRequests.length > 0">
+        <!-- 已完成图片：使用 el-image 渲染缩略图（thumbnail_url 优先，支持 Lightbox） -->
         <div
           v-for="req in completedRequests"
           :key="req.id"
           class="image-grid-item"
         >
-          <!-- 此处需要通过 media API 获取图片 URL，或从 file_url 展示 -->
-          <div class="image-placeholder">
+          <!-- v1.2.1 BUG-01：thumbnail_url 存在时用 el-image，否则降级占位符 -->
+          <el-image
+            v-if="req.thumbnail_url"
+            :src="req.thumbnail_url"
+            :preview-src-list="completedImageUrls"
+            :initial-index="completedRequests.indexOf(req)"
+            class="grid-thumb"
+            fit="cover"
+            loading="lazy"
+            preview-teleported
+          />
+          <div v-else class="image-placeholder">
             <el-icon class="placeholder-icon"><Picture /></el-icon>
             <span class="media-id">素材 #{{ req.media_item_id }}</span>
           </div>
@@ -88,6 +99,8 @@ import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Loading, Picture, CircleClose } from '@element-plus/icons-vue'
 import { imageAPI } from '@/api'
+// v1.2.1 BUG-01：导入 ElImage（BatchDetailPage 内的 el-image 需要全局注册或本地引用）
+// Element Plus 已全局注册，此处无需单独导入，el-image 直接在 template 使用即可
 
 const props = defineProps({
   batchId: {
@@ -108,6 +121,13 @@ const failedRequests = computed(() => {
   if (!batch.value) return []
   return (batch.value.requests || []).filter((r) => r.status === 'failed')
 })
+
+// v1.2.1 BUG-01：已完成图片的 URL 列表，供 el-image preview-src-list 多图切换
+const completedImageUrls = computed(() =>
+  completedRequests.value
+    .filter((r) => r.thumbnail_url)
+    .map((r) => r.thumbnail_url)
+)
 
 onMounted(async () => {
   await loadBatchDetail()
@@ -212,6 +232,24 @@ const formatTime = (iso) => iso ? new Date(iso).toLocaleString('zh-CN') : ''
 .image-grid-item--failed {
   border-color: var(--el-color-danger-light-7);
   background: var(--el-color-danger-light-9);
+}
+
+/* v1.2.1 BUG-01：el-image 缩略图样式 */
+.grid-thumb {
+  width: 100%;
+  height: 140px;
+  display: block;
+}
+
+.grid-thumb :deep(.el-image__inner) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* el-image 预览模式下内部 img 添加 cursor:pointer */
+.grid-thumb :deep(.el-image__preview) {
+  cursor: pointer;
 }
 
 .image-placeholder {

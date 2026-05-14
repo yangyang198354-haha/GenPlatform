@@ -404,3 +404,103 @@ class TestImageBatchDetailView:
         assert resp.status_code == status.HTTP_204_NO_CONTENT
         # MediaItem 应被删除
         assert not MediaItem.objects.filter(pk=media_pk).exists()
+
+    # ── v1.2.1 BUG-01：thumbnail_url 字段 + request context 透传测试 ─────────────
+
+    def test_batch_detail_response_includes_thumbnail_url_field(self, auth_client):
+        """
+        v1.2.1 BUG-01 TC-VIEW-BUG01-01：
+        GET /api/v1/image/batches/{id}/ 响应中 requests[].thumbnail_url 字段存在。
+
+        验证 ImageBatchDetailView.get() 传入了 context={"request": request}，
+        使 thumbnail_url SerializerMethodField 得以正确调用 build_absolute_uri。
+        """
+        client, user = auth_client
+        batch = self._create_batch(user)
+
+        # 创建一条 completed request，result_image_url 非空（模拟降级场景）
+        req = ImageGenerationRequest.objects.create(
+            user=user,
+            batch=batch,
+            prompt="test",
+            model="doubao-seedream-4-5-251128",
+            provider="doubao",
+            status="completed",
+            result_image_url="https://ark-cdn.example.com/test-img.jpg",
+        )
+
+        resp = client.get(f"/api/v1/image/batches/{batch.pk}/")
+        assert resp.status_code == status.HTTP_200_OK
+
+        requests_data = resp.data.get("requests", [])
+        assert len(requests_data) == 1, f"期望 1 条 request，实际 {len(requests_data)}"
+
+        req_data = requests_data[0]
+
+        # thumbnail_url 字段必须存在（v1.2.1 BUG-01 核心验证）
+        assert "thumbnail_url" in req_data, (
+            "v1.2.1 BUG-01 失败：响应中缺少 thumbnail_url 字段。"
+            "检查 ImageBatchDetailView.get() 是否传入了 context={'request': request}。"
+        )
+
+        # result_image_url 字段也必须存在（v1.2.1 同步暴露）
+        assert "result_image_url" in req_data, (
+            "v1.2.1 BUG-01 失败：响应中缺少 result_image_url 字段。"
+        )
+
+    def test_batch_detail_thumbnail_url_falls_back_to_result_image_url(self, auth_client):
+        """
+        v1.2.1 BUG-01 TC-VIEW-BUG01-02：
+        media_item=None 时，thumbnail_url 降级到 result_image_url（Ark CDN URL）。
+        """
+        client, user = auth_client
+        batch = self._create_batch(user)
+
+        ark_url = "https://ark-cdn.example.com/generated-123.jpg"
+        ImageGenerationRequest.objects.create(
+            user=user,
+            batch=batch,
+            prompt="test",
+            model="doubao-seedream-4-5-251128",
+            provider="doubao",
+            status="completed",
+            result_image_url=ark_url,
+            # media_item 默认 null
+        )
+
+        resp = client.get(f"/api/v1/image/batches/{batch.pk}/")
+        assert resp.status_code == status.HTTP_200_OK
+
+        req_data = resp.data["requests"][0]
+        # 无 media_item → thumbnail_url 应降级为 result_image_url 的值
+        assert req_data["thumbnail_url"] == ark_url, (
+            f"thumbnail_url 降级失败：期望 {ark_url}，实际 {req_data.get('thumbnail_url')}"
+        )
+
+    def test_batch_detail_thumbnail_url_empty_for_legacy_data(self, auth_client):
+        """
+        v1.2.1 BUG-01 TC-VIEW-BUG01-03：
+        media_item=None 且 result_image_url="" 时，thumbnail_url="" 不报错（向后兼容）。
+        场景：即梦历史数据，两个 URL 字段均为空。
+        """
+        client, user = auth_client
+        batch = self._create_batch(user)
+
+        ImageGenerationRequest.objects.create(
+            user=user,
+            batch=batch,
+            prompt="legacy test",
+            model="",
+            provider="",
+            status="completed",
+            result_image_url="",
+            # media_item 默认 null
+        )
+
+        resp = client.get(f"/api/v1/image/batches/{batch.pk}/")
+        assert resp.status_code == status.HTTP_200_OK
+
+        req_data = resp.data["requests"][0]
+        assert req_data["thumbnail_url"] == "", (
+            f"历史数据 thumbnail_url 应为空字符串，实际：{req_data.get('thumbnail_url')}"
+        )
