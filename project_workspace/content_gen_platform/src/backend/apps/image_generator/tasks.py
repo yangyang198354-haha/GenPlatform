@@ -42,7 +42,7 @@ def generate_image_task(
     self,
     batch_id: int,
     advanced_params: dict | None = None,
-    size: str = "1024x1024",
+    size: str = "2048x2048",
 ) -> None:
     """
     豆包 Ark 图片批次生成流水线。
@@ -50,7 +50,7 @@ def generate_image_task(
     参数：
         batch_id: ImageBatch 的主键
         advanced_params: 高级生成参数字典（seed/guidance_scale 等，由 View 层传入）
-        size: 图片尺寸（默认 "1024x1024"）
+        size: 图片尺寸（默认 "2048x2048"）
 
     任务流程：
     1. 从 DB 加载 ImageBatch 及关联的 ImageGenerationRequest（n 条）

@@ -171,7 +171,7 @@ class TestDoubaoImageClientAdvancedParams:
             prompt="test",
             model="doubao-seedream-5-0-260128",
             n=1,
-            size="1024x1024",
+            size="2048x2048",
             ref_image_b64=None,
             advanced_params={"seed": 42, "steps": 50, "guidance_scale": 7.5},
         )
@@ -186,7 +186,7 @@ class TestDoubaoImageClientAdvancedParams:
             prompt="test",
             model="doubao-seedream-4-5-251128",
             n=1,
-            size="1024x1024",
+            size="2048x2048",
             ref_image_b64=None,
             advanced_params={"seed": 42, "steps": 30},
         )
@@ -200,7 +200,7 @@ class TestDoubaoImageClientAdvancedParams:
             prompt="test",
             model="doubao-seedream-4-5-251128",
             n=1,
-            size="1024x1024",
+            size="2048x2048",
             ref_image_b64=None,
             advanced_params={"seed": None, "guidance_scale": 7.5},
         )
@@ -215,7 +215,7 @@ class TestDoubaoImageClientAdvancedParams:
             prompt="test",
             model="doubao-seedream-4-5-251128",
             n=1,
-            size="1024x1024",
+            size="2048x2048",
             ref_image_b64=ref_b64,
             advanced_params={},
         )

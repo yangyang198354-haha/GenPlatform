@@ -209,19 +209,19 @@ class TestSubmitSerializerAdvancedParams:
 class TestSubmitSerializerSizeValidation:
     """尺寸枚举校验测试。"""
 
-    def test_valid_size_1024x1024(self):
-        """1024x1024 是默认合法尺寸。"""
-        s = ImageGenerationSubmitSerializer(data={"prompt": "test", "size": "1024x1024"})
+    def test_valid_size_2048x2048(self):
+        """2048x2048 是默认合法尺寸。"""
+        s = ImageGenerationSubmitSerializer(data={"prompt": "test", "size": "2048x2048"})
         assert s.is_valid()
 
-    def test_valid_size_1280x720(self):
-        """1280x720（横向）是合法尺寸。"""
-        s = ImageGenerationSubmitSerializer(data={"prompt": "test", "size": "1280x720"})
+    def test_valid_size_2880x1620(self):
+        """2880x1620（横向）是合法尺寸。"""
+        s = ImageGenerationSubmitSerializer(data={"prompt": "test", "size": "2880x1620"})
         assert s.is_valid()
 
-    def test_valid_size_720x1280(self):
-        """720x1280（竖向）是合法尺寸。"""
-        s = ImageGenerationSubmitSerializer(data={"prompt": "test", "size": "720x1280"})
+    def test_valid_size_1620x2880(self):
+        """1620x2880（竖向）是合法尺寸。"""
+        s = ImageGenerationSubmitSerializer(data={"prompt": "test", "size": "1620x2880"})
         assert s.is_valid()
 
     def test_invalid_size_is_rejected(self):
