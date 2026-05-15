@@ -189,11 +189,20 @@ async function waitForLlmSelector(page: Page): Promise<void> {
 /**
  * 展开 el-select 下拉。
  * 遵守规范：点击 .el-select__wrapper，不直接操作原生 <select>。
+ *
+ * 修复（fix/ci-llm-selector-mock）：
+ *   页面上存在多个 el-select（platform / style / wordLimit / llm），
+ *   .el-select-dropdown 经 Teleport 挂在 body 下，.first() 可能命中其他 select 的
+ *   隐藏 dropdown 而非 llm-select 的那个。
+ *   改为等待包含 llm option（data-testid="llm-option-*"）的 dropdown 可见，
+ *   精确定位到 llm-select 产生的弹层。
  */
 async function openLlmDropdown(page: Page): Promise<void> {
   await page.locator('[data-testid="llm-select"] .el-select__wrapper').click()
-  // 等待下拉弹层出现
-  await page.locator('.el-select-dropdown').first().waitFor({ state: 'visible', timeout: 3_000 })
+  // 等待包含 llm option 的弹层可见（精确匹配 llm-select 的 dropdown）
+  await page.locator('.el-select-dropdown')
+    .filter({ has: page.locator('[data-testid^="llm-option-"]') })
+    .waitFor({ state: 'visible', timeout: 5_000 })
 }
 
 /**
@@ -263,15 +272,25 @@ test.describe('US-01 — 首次使用，仅配 DeepSeek', () => {
    * AC-US01-3（部分）：生成按钮可用（有有效 provider 时）
    *
    * data-testid="workspace-llm-selector" 和 "generate-btn" 来自 WorkspaceView
+   *
+   * 修复（fix/ci-llm-selector-mock）：
+   *   generateDisabled = !form.prompt || noAvailableProviders || !form.selectedLlm
+   *   初始 form.prompt = ''，所以 !form.prompt 始终为 true，无论 provider 是否
+   *   就绪，按钮都是 disabled。必须先填写 prompt 才能让该条件退出。
    */
   test('AC-US01-3: 有有效 provider 时生成按钮可用', async ({ page }) => {
     await mockProviders(page, MOCK_DEEPSEEK_ONLY)
     await gotoWorkspace(page)
     await waitForLlmSelector(page)
+    // 等待 autoSelect 执行完毕（llmStore.fetchProviders → autoSelect → emit selectedLlm）
     await page.waitForTimeout(500)
 
+    // 填写 prompt — generateDisabled 依赖 !form.prompt，不填 prompt 按钮永远 disabled
+    const promptInput = page.locator('textarea').first()
+    await promptInput.fill('测试提示词')
+
     const generateBtn = page.locator('[data-testid="generate-btn"]')
-    // 按钮存在时不应被禁用（有 provider 且已预选）
+    // 按钮存在时不应被禁用（有 provider、已预选、已填 prompt）
     if (await generateBtn.count() > 0) {
       await expect(generateBtn).not.toBeDisabled({ timeout: 3_000 })
     }
