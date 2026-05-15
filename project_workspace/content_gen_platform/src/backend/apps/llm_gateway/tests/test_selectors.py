@@ -51,6 +51,48 @@ class TestWhitelistCanary:
         assert SUPPORTED_LLM_SERVICE_TYPES.index("llm_deepseek") < \
                SUPPORTED_LLM_SERVICE_TYPES.index("llm_volcano")
 
+    # -- PR-5 新增 Canary 守卫 (A.2) -----------------------------------------
+
+    def test_canary_default_model_is_deepseek_v3(self):
+        """Canary (PR-5): 硬断言系统默认 model 仍是 deepseek-chat（又名 DeepSeek V3）。
+
+        防止有人修改 MODEL_WHITELIST 时误将 deepseek-reasoner 调到第一位，
+        导致"无偏好用户"的系统默认从 deepseek-chat 悄悄变成 deepseek-reasoner。
+        """
+        from apps.llm_gateway.selectors import MODEL_WHITELIST
+        assert MODEL_WHITELIST["llm_deepseek"][0]["id"] == "deepseek-chat", (
+            "系统默认 model 必须是 deepseek-chat（DeepSeek V3），"
+            "如需更改请同步更新 resolve_default 的 Step 2 硬编码返回值，"
+            "并确认前端 i18n 文案和 AC-02 验收准则。"
+        )
+
+    def test_canary_supported_service_types_exact_list(self):
+        """Canary (PR-5): SUPPORTED_LLM_SERVICE_TYPES 必须精确为 ["llm_deepseek", "llm_volcano"]。
+
+        防止有人误改顺序（导致 UI 默认变 volcano）或增删 service_type
+        （导致 resolve_default 决策链逻辑错乱）。
+        如需新增 provider，同时更新此 Canary 和 design.md §4.1。
+        """
+        from apps.llm_gateway.selectors import SUPPORTED_LLM_SERVICE_TYPES
+        assert SUPPORTED_LLM_SERVICE_TYPES == ["llm_deepseek", "llm_volcano"], (
+            "SUPPORTED_LLM_SERVICE_TYPES 的顺序和内容是 resolve_default 决策链的依据，"
+            "llm_deepseek 必须在第一位（系统默认 provider）。"
+        )
+
+    def test_canary_volcano_whitelist_includes_doubao_pro_32k(self):
+        """Canary (PR-5): doubao-pro-32k 必须在火山引擎白名单中。
+
+        PR-2 已验证过此 ID 可真实调用 Ark /chat/completions，
+        确认 Ark 发新版后旧 ID 未被提前从白名单中移除。
+        若 Ark 下线该 ID，请先通过真实业务端点验证新 ID 后再更新白名单。
+        """
+        from apps.llm_gateway.selectors import MODEL_WHITELIST
+        volcano_ids = [m["id"] for m in MODEL_WHITELIST.get("llm_volcano", [])]
+        assert "doubao-pro-32k" in volcano_ids, (
+            "doubao-pro-32k 必须保留在 llm_volcano 白名单中。"
+            "如需移除，请先确认 Ark 已下线该 ID，并通知前端更新 UI 默认值。"
+        )
+
 
 # ---------------------------------------------------------------------------
 # validate_choice
