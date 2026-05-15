@@ -35,6 +35,9 @@ class Content(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     confirmed_at = models.DateTimeField(null=True, blank=True)
+    # LLM 审计字段：记录生成本条内容时实际使用的 provider 和 model（PR-1 新增）
+    provider = models.CharField(max_length=32, null=True, blank=True)
+    model = models.CharField(max_length=64, null=True, blank=True)
 
     class Meta:
         db_table = "content_content"

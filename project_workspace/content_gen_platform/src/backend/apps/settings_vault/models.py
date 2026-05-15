@@ -34,6 +34,12 @@ class UserServiceConfig(models.Model):
         blank=True,
         help_text="最近一次成功验证 Key 有效性的时间（由 TestAndSaveView 写入，ADR-10）",
     )
+    # 最近一次连通性探活时间（预留，本期仅加字段不填充值；与 last_validated_at 语义不同）
+    last_tested_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="最近一次连通性探活时间（预留字段，本期 migration 加字段但不填充值）",
+    )
 
     class Meta:
         db_table = "settings_service_config"
