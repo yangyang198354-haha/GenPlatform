@@ -1,4 +1,13 @@
-"""Unit tests for llm_gateway.views — GenerateContentView."""
+"""Unit tests for llm_gateway.views — GenerateContentView.
+
+PR-3 变更后的兼容说明：
+  - GenerateContentView._handle() 现在通过 resolve_default()/validate_choice()
+    而非直接 .filter().first() 来解析 provider。
+  - 需要触达 SSE 流的测试必须同时 mock resolve_default，以绕过
+    last_validated_at 校验（_create_llm_config 不设该字段）。
+  - 旧的 test_generate_no_llm_config 检测的是"无配置"场景，现在
+    resolve_default 抛 NoAvailableProviderError → 400，语义不变。
+"""
 import json
 import pytest
 from unittest.mock import MagicMock, patch
@@ -12,6 +21,9 @@ from apps.settings_vault.models import UserServiceConfig
 User = get_user_model()
 
 GENERATE_URL = "/api/v1/llm/generate/"
+
+# resolve_default 的 mock 默认返回值（与 _create_llm_config 的 service_type 一致）
+_DEFAULT_RESOLVE = ("llm_deepseek", "deepseek-chat")
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -59,9 +71,18 @@ class TestGenerateContentView:
         assert resp.status_code == 401
 
     def test_generate_no_llm_config(self, user, db):
-        """Authenticated user with no LLM config must receive 400 with error field."""
+        """Authenticated user with no LLM config must receive 400 with error field.
+
+        PR-3 后：resolve_default 抛 NoAvailableProviderError → 400 NO_AVAILABLE_PROVIDER。
+        不再依赖 .first() 逻辑，行为语义不变（无配置 → 400）。
+        """
+        from apps.llm_gateway.selectors import NoAvailableProviderError
         client = _auth_client(user)
-        resp = client.get(GENERATE_URL, {"prompt": "write something"})
+        with patch(
+            "apps.llm_gateway.views.resolve_default",
+            side_effect=NoAvailableProviderError("no provider"),
+        ):
+            resp = client.get(GENERATE_URL, {"prompt": "write something"})
         assert resp.status_code == 400
         assert "error" in resp.data
 
@@ -102,7 +123,8 @@ class TestSSEContentNegotiation:
         _create_llm_config(user)
         client = _auth_client(user)
 
-        with patch("apps.llm_gateway.views.get_provider", return_value=self._fake_provider()):
+        with patch("apps.llm_gateway.views.resolve_default", return_value=_DEFAULT_RESOLVE), \
+             patch("apps.llm_gateway.views.get_provider", return_value=self._fake_provider()):
             resp = client.get(
                 GENERATE_URL,
                 {"prompt": "write something"},
@@ -119,7 +141,8 @@ class TestSSEContentNegotiation:
         _create_llm_config(user)
         client = _auth_client(user)
 
-        with patch("apps.llm_gateway.views.get_provider", return_value=self._fake_provider()):
+        with patch("apps.llm_gateway.views.resolve_default", return_value=_DEFAULT_RESOLVE), \
+             patch("apps.llm_gateway.views.get_provider", return_value=self._fake_provider()):
             resp = client.get(GENERATE_URL, {"prompt": "test"})
 
         assert "text/event-stream" in resp.get("Content-Type", "")
@@ -129,7 +152,8 @@ class TestSSEContentNegotiation:
         _create_llm_config(user)
         client = _auth_client(user)
 
-        with patch("apps.llm_gateway.views.get_provider", return_value=self._fake_provider(["tok1", "tok2"])):
+        with patch("apps.llm_gateway.views.resolve_default", return_value=_DEFAULT_RESOLVE), \
+             patch("apps.llm_gateway.views.get_provider", return_value=self._fake_provider(["tok1", "tok2"])):
             resp = client.get(GENERATE_URL, {"prompt": "test"})
 
         events = _collect_sse(resp)
@@ -143,7 +167,8 @@ class TestSSEContentNegotiation:
         _create_llm_config(user)
         client = _auth_client(user)
 
-        with patch("apps.llm_gateway.views.get_provider", return_value=self._fake_provider(["x"])):
+        with patch("apps.llm_gateway.views.resolve_default", return_value=_DEFAULT_RESOLVE), \
+             patch("apps.llm_gateway.views.get_provider", return_value=self._fake_provider(["x"])):
             resp = client.get(GENERATE_URL, {"prompt": "test"})
 
         events = _collect_sse(resp)
@@ -155,7 +180,8 @@ class TestSSEContentNegotiation:
         _create_llm_config(user)
         client = _auth_client(user)
 
-        with patch("apps.llm_gateway.views.get_provider", return_value=self._fake_provider()):
+        with patch("apps.llm_gateway.views.resolve_default", return_value=_DEFAULT_RESOLVE), \
+             patch("apps.llm_gateway.views.get_provider", return_value=self._fake_provider()):
             resp = client.get(GENERATE_URL, {"prompt": "hello"})
 
         assert resp.status_code == 200
