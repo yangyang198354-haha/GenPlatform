@@ -87,13 +87,27 @@ class ServiceConfigDetailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # INC-2026-05-15 修复：保存时自动探活并回写 last_validated_at。
+        # 否则 selectors.last_test_ok 始终为 False，前端 LlmSelector 永远置灰。
+        # 测试失败也允许保存（last_validated_at 写 None），用户可后续点"测试连接"重试。
+        test_result = _test_connection(service_type, dict(config_data))
+        test_ok = bool(test_result.get("success"))
+
         encrypted = encrypt(dict(config_data))
         UserServiceConfig.objects.update_or_create(
             user=request.user,
             service_type=service_type,
-            defaults={"encrypted_config": encrypted, "is_active": True},
+            defaults={
+                "encrypted_config": encrypted,
+                "is_active": True,
+                "last_validated_at": timezone.now() if test_ok else None,
+            },
         )
-        return Response({"message": "配置已保存"})
+
+        response_data = {"message": "配置已保存", "test_passed": test_ok}
+        if not test_ok:
+            response_data["test_warning"] = test_result.get("message", "连接测试未通过")
+        return Response(response_data)
 
     def delete(self, request, service_type):
         UserServiceConfig.objects.filter(user=request.user, service_type=service_type).update(
@@ -115,6 +129,14 @@ class ServiceConfigTestView(APIView):
             return Response({"error": "未找到该服务配置"}, status=status.HTTP_404_NOT_FOUND)
 
         result = _test_connection(service_type, config)
+
+        # INC-2026-05-15 修复：测试成功时回写 last_validated_at，让 LlmSelector 解灰。
+        # 用 .filter().update() 而非 cfg.save()，原子且不读全字段。
+        if result.get("success"):
+            UserServiceConfig.objects.filter(pk=cfg.pk).update(
+                last_validated_at=timezone.now()
+            )
+
         return Response(result)
 
 

@@ -1,5 +1,6 @@
 """Unit tests for settings_vault.views — ServiceConfigListView / ServiceConfigDetailView."""
 import pytest
+from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -14,6 +15,10 @@ SERVICES_LIST_URL = "/api/v1/settings/services/"
 
 def _url_detail(service_type):
     return f"/api/v1/settings/services/{service_type}/"
+
+
+def _url_test(service_type):
+    return f"/api/v1/settings/services/{service_type}/test/"
 
 
 def _auth_client(user):
@@ -69,11 +74,16 @@ class TestServiceConfigDetailView:
     def test_save_llm_config_creates_encrypted_record(self, user, db):
         """PUT /settings/services/llm_deepseek/ must create an encrypted UserServiceConfig row."""
         client = _auth_client(user)
-        resp = client.put(
-            _url_detail("llm_deepseek"),
-            {"api_key": "sk-real-key-test"},
-            format="json",
-        )
+        # 自 INC-2026-05-15 修复起，PUT 内部会调 _test_connection 探活，避免真实 HTTP 必须 mock
+        with patch(
+            "apps.settings_vault.views._test_connection",
+            return_value={"success": True, "message": "ok"},
+        ):
+            resp = client.put(
+                _url_detail("llm_deepseek"),
+                {"api_key": "sk-real-key-test"},
+                format="json",
+            )
         assert resp.status_code == 200
         cfg = UserServiceConfig.objects.get(user=user, service_type="llm_deepseek")
         assert cfg.is_active is True
@@ -164,3 +174,122 @@ class TestJimengV12Cleanup:
             assert 'jimeng' not in pattern_str.lower(), (
                 f"image_generator URL 中发现 jimeng 相关路由：{pattern_str}（AC-08-4）"
             )
+
+
+@pytest.mark.django_db
+class TestLastValidatedAtWriteback:
+    """
+    INC-2026-05-15 回归 + Canary：保存/测试 LLM 配置必须正确写入 last_validated_at。
+
+    背景：原实现 PUT 与 TestView 都不写 last_validated_at，导致 selectors.last_test_ok
+    永远为 False，LlmSelector 永远置灰。本类锁死该字段的写入语义防回归。
+    """
+
+    def test_save_llm_with_passing_test_sets_last_validated_at(self, user, db):
+        """PUT + 探活成功 → last_validated_at 非空（让 LlmSelector 解灰）。"""
+        client = _auth_client(user)
+        with patch(
+            "apps.settings_vault.views._test_connection",
+            return_value={"success": True, "message": "ok"},
+        ):
+            resp = client.put(
+                _url_detail("llm_deepseek"),
+                {"api_key": "sk-test"},
+                format="json",
+            )
+        assert resp.status_code == 200
+        assert resp.data["test_passed"] is True
+        cfg = UserServiceConfig.objects.get(user=user, service_type="llm_deepseek")
+        assert cfg.last_validated_at is not None, (
+            "test_passed 时必须写 last_validated_at，否则 LlmSelector 仍灰色（INC-2026-05-15）"
+        )
+
+    def test_save_llm_with_failing_test_keeps_last_validated_at_null(self, user, db):
+        """PUT + 探活失败 → 仍保存配置，但 last_validated_at 为 None（前端 tooltip 提示）。"""
+        client = _auth_client(user)
+        with patch(
+            "apps.settings_vault.views._test_connection",
+            return_value={"success": False, "message": "HTTP 401"},
+        ):
+            resp = client.put(
+                _url_detail("llm_deepseek"),
+                {"api_key": "sk-bad"},
+                format="json",
+            )
+        assert resp.status_code == 200
+        assert resp.data["test_passed"] is False
+        assert "test_warning" in resp.data
+        cfg = UserServiceConfig.objects.get(user=user, service_type="llm_deepseek")
+        assert cfg.is_active is True
+        assert cfg.last_validated_at is None
+
+    def test_save_llm_update_with_failing_test_clears_previously_valid_timestamp(self, user, db):
+        """更新 key 时探活失败 → 旧的 last_validated_at 必须被清空（防止 UI 误导）。"""
+        from django.utils import timezone
+        UserServiceConfig.objects.create(
+            user=user,
+            service_type="llm_deepseek",
+            encrypted_config=encrypt({"api_key": "sk-old"}),
+            is_active=True,
+            last_validated_at=timezone.now(),
+        )
+        client = _auth_client(user)
+        with patch(
+            "apps.settings_vault.views._test_connection",
+            return_value={"success": False, "message": "HTTP 401"},
+        ):
+            resp = client.put(
+                _url_detail("llm_deepseek"),
+                {"api_key": "sk-new-bad"},
+                format="json",
+            )
+        assert resp.status_code == 200
+        cfg = UserServiceConfig.objects.get(user=user, service_type="llm_deepseek")
+        assert cfg.last_validated_at is None, (
+            "更新失败时旧的 validated 时间戳必须清空，否则 selector 误认为新 key 已验证"
+        )
+
+    def test_test_view_success_writes_last_validated_at(self, user, db):
+        """POST /test/ 探活成功 → 回写 last_validated_at（让已存 key 的老用户解灰）。"""
+        UserServiceConfig.objects.create(
+            user=user,
+            service_type="llm_deepseek",
+            encrypted_config=encrypt({"api_key": "sk-test"}),
+            is_active=True,
+            last_validated_at=None,
+        )
+        client = _auth_client(user)
+        with patch(
+            "apps.settings_vault.views._test_connection",
+            return_value={"success": True, "message": "ok"},
+        ):
+            resp = client.post(_url_test("llm_deepseek"))
+        assert resp.status_code == 200
+        cfg = UserServiceConfig.objects.get(user=user, service_type="llm_deepseek")
+        assert cfg.last_validated_at is not None, (
+            "测试成功必须回写 last_validated_at，否则 LlmSelector 仍灰色（INC-2026-05-15）"
+        )
+
+    def test_test_view_failure_does_not_touch_last_validated_at(self, user, db):
+        """POST /test/ 探活失败 → 不改 last_validated_at（保留原值，无论是 None 还是有值）。"""
+        from django.utils import timezone
+        prior = timezone.now()
+        UserServiceConfig.objects.create(
+            user=user,
+            service_type="llm_deepseek",
+            encrypted_config=encrypt({"api_key": "sk-test"}),
+            is_active=True,
+            last_validated_at=prior,
+        )
+        client = _auth_client(user)
+        with patch(
+            "apps.settings_vault.views._test_connection",
+            return_value={"success": False, "message": "HTTP 401"},
+        ):
+            resp = client.post(_url_test("llm_deepseek"))
+        assert resp.status_code == 200
+        cfg = UserServiceConfig.objects.get(user=user, service_type="llm_deepseek")
+        # 失败时保留原值（这里是 prior 时间戳；若原本是 None 则保持 None）
+        assert cfg.last_validated_at == prior, (
+            "测试失败时不应覆盖原 last_validated_at"
+        )
