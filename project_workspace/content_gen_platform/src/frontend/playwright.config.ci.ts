@@ -13,7 +13,10 @@ import { defineConfig, devices } from '@playwright/test'
  *   npx playwright test --config=playwright.config.ci.ts
  */
 export default defineConfig({
-  testDir: './e2e',
+  // 仅匹配已完整 mock 后端 API 的 spec。CI 环境只有前端 vite + mock storageState，
+  // 其他 e2e spec 依赖真实后端，在 CI 中会等 API 响应直至超时。新增 spec 需先完成
+  // API mock 才能加入此列表。
+  testMatch: ['**/e2e/llm_selection.spec.ts'],
   timeout: 30_000,
   retries: 2,
   workers: 1,
