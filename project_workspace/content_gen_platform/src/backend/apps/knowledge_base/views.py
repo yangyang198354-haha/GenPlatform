@@ -2,6 +2,7 @@
 import json
 import os
 from django.conf import settings
+from django.db.models import F
 from rest_framework import generics, status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
@@ -127,8 +128,9 @@ class DocumentBatchUploadView(APIView):
             relative_paths = []
 
         user: User = request.user
-        # Refresh user from DB to get the latest used_storage_bytes
-        user.refresh_from_db()
+        # NOTE: No refresh_from_db() needed here — all quota checks are now done
+        # via atomic database-level UPDATE (TOCTOU-safe), so the in-memory
+        # used_storage_bytes snapshot is no longer used for quota decisions.
 
         max_size = getattr(settings, "MAX_DOCUMENT_SIZE_BYTES", MAX_FILE_SIZE_BYTES)
         upload_dir = os.path.join(settings.MEDIA_ROOT, "documents", str(user.pk))
@@ -163,8 +165,33 @@ class DocumentBatchUploadView(APIView):
                 })
                 continue
 
-            # --- Quota check ---
-            if quota_exhausted or not user.has_storage_quota(file.size):
+            # --- Quota check (atomic) ---
+            # Use a database-level atomic compare-and-update instead of reading
+            # used_storage_bytes into Python and comparing there.  The in-memory
+            # approach is vulnerable to a TOCTOU race: if two concurrent batch
+            # uploads read the same snapshot they can both pass the quota check
+            # and together exceed the quota limit.
+            #
+            # The UPDATE below succeeds (rowcount == 1) only when the new total
+            # would still be within the quota; otherwise it is a no-op and we
+            # treat this file as quota-exceeded.  This is safe under concurrent
+            # requests because PostgreSQL evaluates the WHERE predicate
+            # atomically inside the row-level lock acquired by UPDATE.
+            if quota_exhausted:
+                rejected.append({
+                    "name": original_filename,
+                    "reason": "quota_exceeded",
+                })
+                continue
+
+            updated = User.objects.filter(
+                pk=user.pk,
+                used_storage_bytes__lte=F("storage_quota_bytes") - file.size,
+            ).update(used_storage_bytes=F("used_storage_bytes") + file.size)
+
+            if updated == 0:
+                # Quota would be exceeded — flag so all remaining files are also
+                # rejected without hitting the DB again.
                 quota_exhausted = True
                 rejected.append({
                     "name": original_filename,
@@ -194,9 +221,10 @@ class DocumentBatchUploadView(APIView):
                 file_type=ext,
                 status="processing",
             )
-            user.consume_storage(file.size)
-            # Refresh so subsequent quota checks use updated used_storage_bytes
-            user.refresh_from_db()
+            # Storage already consumed by the atomic UPDATE above; no second
+            # consume_storage() call needed.  refresh_from_db is also skipped
+            # because all subsequent quota checks are atomic DB operations that
+            # do not rely on the Python object's used_storage_bytes field.
 
             process_document_task.delay(doc.pk)
 

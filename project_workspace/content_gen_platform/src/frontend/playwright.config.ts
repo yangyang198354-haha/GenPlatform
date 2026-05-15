@@ -21,7 +21,11 @@ import { defineConfig, devices } from '@playwright/test'
  *   - el-image preview：Lightbox 弹层挂载在 body，需 page.locator('body')...
  */
 export default defineConfig({
-  testDir: './e2e',
+  // Scan both e2e/ (JS-spec tests) and playwright/ (TS-spec tests, e.g. kb.spec.ts).
+  // Using testDir: './e2e' alone creates a scan blind-spot for tests under playwright/,
+  // which means KB upload regressions can reach production undetected.
+  // See: memory/feedback_e2e_playwright_patterns.md — Rule 4
+  testMatch: ['**/e2e/**/*.{js,ts}', '**/playwright/**/*.{js,ts}'],
   timeout: 30_000,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : 2,

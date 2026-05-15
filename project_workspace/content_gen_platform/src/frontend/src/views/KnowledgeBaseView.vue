@@ -364,14 +364,22 @@ async function handleDirSelected(event) {
 
   try {
     const { data } = await kbAPI.batchUpload(formData);
-    if (data.accepted.length > 0) {
-      ElMessage.success(data.summary);
+    // Guard: if the server response is missing the expected shape (e.g. proxy
+    // truncation, serializer version mismatch), degrade gracefully instead of
+    // throwing "Cannot read properties of undefined (reading 'length')" which
+    // would be swallowed by the catch block and show a misleading "目录上传失败"
+    // message even though the upload may have partially succeeded.
+    const accepted = Array.isArray(data?.accepted) ? data.accepted : [];
+    if (accepted.length > 0) {
+      ElMessage.success(data.summary || `${accepted.length} 个文件已提交处理`);
     } else {
-      ElMessage.warning(data.summary || "没有文件成功入库");
+      ElMessage.warning(data?.summary || "没有文件成功入库");
     }
     // Re-fetch to get the newly created documents and start polling for them
     await fetchDocuments();
   } catch (err) {
+    // err.response is set for HTTP 4xx/5xx responses; absent for network errors
+    // or JS exceptions thrown before the request completes.
     const msg = err.response?.data?.error || "目录上传失败，请重试";
     ElMessage.error(msg);
   } finally {

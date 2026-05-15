@@ -672,3 +672,174 @@ class TestSearchUserIsolation:
         result_contents = [r.content for r in results]
         assert any("Alice" in c for c in result_contents), "Alice's chunk must appear"
         assert not any("Bob" in c for c in result_contents), "Bob's chunk must NOT appear"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Canary Guards — Batch Upload Atomic Quota Fix
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestBatchUploadAtomicQuotaGuard:
+    """
+    Canary / regression tests for the TOCTOU-safe atomic quota check introduced
+    in DocumentBatchUploadView.post().
+
+    BACKGROUND (INC-2026-05-15 investigation):
+    The original implementation used `user.has_storage_quota(file.size)` which
+    reads `used_storage_bytes` from the in-memory Python object.  Because
+    `consume_storage()` uses an F() expression to update only the database row,
+    concurrent batch-upload requests could read the same stale snapshot and both
+    pass the quota gate, together exceeding the user's quota limit.
+
+    FIX: Replace the in-memory check with an atomic database UPDATE:
+        User.objects.filter(
+            pk=user.pk,
+            used_storage_bytes__lte=F('storage_quota_bytes') - file.size
+        ).update(used_storage_bytes=F('used_storage_bytes') + file.size)
+
+    An `updated == 0` result means the quota would be exceeded; the file is
+    rejected and `quota_exhausted=True` is set so no further files are attempted.
+    PostgreSQL evaluates the WHERE predicate inside the row-level lock, making
+    the check-and-increment atomic.
+
+    These tests are the regression guard for that fix.  If anyone reverts the
+    atomic approach, at least one test here will fail, preventing silent quota
+    bypass from reaching production.
+    """
+
+    @patch("apps.knowledge_base.views.process_document_task")
+    def test_atomic_quota_check_accepts_file_within_quota(
+        self, mock_task, auth_client, user, settings, tmp_path
+    ):
+        """
+        Baseline: when the file fits within the quota, the atomic UPDATE must
+        succeed (updated == 1) and the file must be accepted.
+        """
+        settings.MEDIA_ROOT = str(tmp_path)
+        settings.MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024
+
+        user.storage_quota_bytes = 1000
+        user.used_storage_bytes = 0
+        user.save()
+
+        client, _ = auth_client
+        f = _fake_file("fits.txt", b"x" * 100)  # 100 bytes < 1000 quota
+
+        resp = client.post(BATCH_URL, data={"files": [f]}, format="multipart")
+
+        assert resp.status_code == status.HTTP_201_CREATED
+        assert len(resp.data["accepted"]) == 1
+        assert resp.data["quota_exhausted"] is False
+
+        # After the atomic UPDATE the DB row must reflect the consumed bytes
+        user.refresh_from_db()
+        assert user.used_storage_bytes == 100, (
+            f"used_storage_bytes must be 100 after accepting a 100-byte file, "
+            f"got {user.used_storage_bytes}. "
+            "The atomic UPDATE must write used_storage_bytes to the database."
+        )
+
+    @patch("apps.knowledge_base.views.process_document_task")
+    def test_atomic_quota_check_rejects_file_exceeding_quota(
+        self, mock_task, auth_client, user, settings, tmp_path
+    ):
+        """
+        Core guard: when the file would exceed the quota, the atomic UPDATE
+        must be a no-op (updated == 0) and the file must be rejected with
+        reason='quota_exceeded'.  used_storage_bytes must NOT increase.
+        """
+        settings.MEDIA_ROOT = str(tmp_path)
+        settings.MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024
+
+        user.storage_quota_bytes = 50
+        user.used_storage_bytes = 0
+        user.save()
+
+        client, _ = auth_client
+        f = _fake_file("too_big.txt", b"x" * 100)  # 100 bytes > 50 quota
+
+        resp = client.post(BATCH_URL, data={"files": [f]}, format="multipart")
+
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST, (
+            "A file that exceeds the quota must produce a 400 (no files accepted)."
+        )
+        assert "配额" in resp.data.get("error", "") or "存储" in resp.data.get("error", ""), (
+            f"Error message must mention quota exhaustion, got: {resp.data.get('error')!r}"
+        )
+
+        # The atomic UPDATE must have been a no-op: bytes must not change
+        user.refresh_from_db()
+        assert user.used_storage_bytes == 0, (
+            f"used_storage_bytes must remain 0 after a quota-exceeded rejection, "
+            f"got {user.used_storage_bytes}. "
+            "The atomic UPDATE must NOT increment used_storage_bytes when quota is exceeded."
+        )
+
+    @patch("apps.knowledge_base.views.process_document_task")
+    def test_atomic_quota_check_partially_accepts_until_quota_exhausted(
+        self, mock_task, auth_client, user, settings, tmp_path
+    ):
+        """
+        Regression guard for the 'stop on quota exhausted' semantics:
+        files are accepted in order until the quota is exhausted; remaining
+        files must all be rejected with reason='quota_exceeded'.
+
+        quota = 150 bytes; files are 100 + 100 bytes
+          → first file (100): accepted  (used = 100, remaining = 50 < 100)
+          → second file (100): rejected  (100 > 50 remaining)
+        """
+        settings.MEDIA_ROOT = str(tmp_path)
+        settings.MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024
+
+        user.storage_quota_bytes = 150
+        user.used_storage_bytes = 0
+        user.save()
+
+        client, _ = auth_client
+        a = _fake_file("a.txt", b"a" * 100)
+        b = _fake_file("b.txt", b"b" * 100)
+
+        resp = client.post(BATCH_URL, data={"files": [a, b]}, format="multipart")
+
+        assert resp.status_code == status.HTTP_201_CREATED
+        assert len(resp.data["accepted"]) == 1
+        assert resp.data["accepted"][0]["name"] == "a.txt"
+        assert resp.data["quota_exhausted"] is True
+        assert len(resp.data["rejected"]) == 1
+        assert resp.data["rejected"][0]["name"] == "b.txt"
+        assert resp.data["rejected"][0]["reason"] == "quota_exceeded"
+
+        user.refresh_from_db()
+        assert user.used_storage_bytes == 100, (
+            f"After accepting a.txt (100 bytes), used_storage_bytes must be 100, "
+            f"got {user.used_storage_bytes}. "
+            "b.txt must NOT have been charged because the atomic UPDATE was a no-op."
+        )
+
+    def test_used_storage_not_incremented_when_no_quota(
+        self, auth_client, user, settings
+    ):
+        """
+        Edge-case guard: when quota is exactly 0, the atomic UPDATE WHERE clause
+        `used_storage_bytes <= storage_quota_bytes - file.size` evaluates to
+        `0 <= 0 - N` (i.e. `0 <= -N` for any positive N), which is False.
+        The UPDATE must be a no-op and used_storage_bytes must remain 0.
+        """
+        settings.MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024
+
+        user.storage_quota_bytes = 0
+        user.used_storage_bytes = 0
+        user.save()
+
+        client, _ = auth_client
+        f = _fake_file("any.txt", b"x")  # even 1 byte exceeds a 0-byte quota
+
+        resp = client.post(BATCH_URL, data={"files": [f]}, format="multipart")
+
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        user.refresh_from_db()
+        assert user.used_storage_bytes == 0, (
+            "used_storage_bytes must not change when quota is 0 and the atomic "
+            "UPDATE correctly rejects all files."
+        )
