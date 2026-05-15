@@ -49,6 +49,15 @@
           </el-form-item>
         </div>
 
+        <!-- LLM model selector (full-width row below the 3-column params) -->
+        <div class="llm-row">
+          <LlmSelector
+            v-model="form.selectedLlm"
+            :disabled="generating"
+            data-testid="workspace-llm-selector"
+          />
+        </div>
+
         <el-form-item label="创作指令">
           <el-input
             v-model="form.prompt"
@@ -74,9 +83,10 @@
             <el-button
               type="primary"
               :loading="generating"
-              :disabled="!form.prompt"
+              :disabled="generateDisabled"
               @click="startGeneration"
               class="generate-btn"
+              data-testid="generate-btn"
             >
               <el-icon v-if="!generating"><MagicStick /></el-icon>
               {{ generating ? '生成中...' : '开始生成' }}
@@ -148,10 +158,13 @@ import {
   Edit, Document, MagicStick, VideoPause,
   SuccessFilled, FolderAdd, CircleCheckFilled, CircleCheck,
 } from '@element-plus/icons-vue'
-import { contentAPI } from '@/api'
+import { contentAPI, llmAPI } from '@/api'
 import { useAuthStore } from '@/stores/auth'
+import { useLlmStore } from '@/stores/llm'
+import LlmSelector from '@/components/LlmSelector.vue'
 
 const auth = useAuthStore()
+const llmStore = useLlmStore()
 
 const platforms = [
   { value: 'general',      label: '通用',       emoji: '🌐' },
@@ -171,6 +184,7 @@ const styles = [
 const form = reactive({
   prompt: '', platform: 'general', style: 'professional',
   wordLimit: null, useKb: true,
+  selectedLlm: null,  // { provider: string, model: string } | null
 })
 
 const generatedText  = ref('')
@@ -182,7 +196,29 @@ const isDirty        = ref(false)
 const platformLabel = computed(() => platforms.find(p => p.value === form.platform)?.label || '')
 const styleLabel    = computed(() => styles.find(s => s.value === form.style)?.label || '')
 
+// Generate button is disabled when prompt is empty OR no usable LLM is selected
+const generateDisabled = computed(() =>
+  !form.prompt || llmStore.noAvailableProviders || !form.selectedLlm
+)
+
 let abortController = null
+
+// ── Error code → human-readable message mapping ────────────────────────────
+const LLM_ERROR_MESSAGES = {
+  NO_AVAILABLE_PROVIDER:   '请先配置 DeepSeek 服务，或在下拉框选择其他已配置的模型',
+  NO_PROVIDER_AVAILABLE:   '请先配置 DeepSeek 服务，或在下拉框选择其他已配置的模型',
+  INVALID_PROVIDER:        '所选 AI 服务无效，请重新选择',
+  INVALID_MODEL:           '所选模型无效，请重新选择',
+  PROVIDER_NOT_CONFIGURED: '所选 AI 服务尚未配置',
+  INVALID_PARAMS:          'provider 与 model 参数有误，请重新选择',
+}
+
+function llmErrorMessage(errorCode, providerLabel) {
+  if (errorCode === 'UPSTREAM_ERROR') {
+    return `调用 ${providerLabel || 'AI 服务'} 失败，请稍后重试`
+  }
+  return LLM_ERROR_MESSAGES[errorCode] || '生成失败，请检查 LLM 配置'
+}
 
 const startGeneration = async () => {
   if (!form.prompt) return
@@ -190,23 +226,33 @@ const startGeneration = async () => {
   savedContentId.value = null
   generating.value     = true
 
-  const params = new URLSearchParams({
-    prompt: form.prompt, platform: form.platform,
-    style: form.style, use_kb: form.useKb,
+  // Build POST body for /api/v1/llm/generate/
+  const payload = {
+    prompt:    form.prompt,
+    platform:  form.platform,
+    style:     form.style,
+    use_kb:    form.useKb,
     ...(form.wordLimit ? { word_limit: form.wordLimit } : {}),
-  })
+    // Attach provider+model only when the user has selected one
+    ...(form.selectedLlm
+      ? { provider: form.selectedLlm.provider, model: form.selectedLlm.model }
+      : {}),
+  }
 
   abortController = new AbortController()
 
   try {
-    const response = await fetch(`/api/v1/llm/generate/?${params}`, {
-      headers: { Authorization: `Bearer ${auth.accessToken}` },
-      signal: abortController.signal,
-    })
+    const response = await llmAPI.generateStream(
+      payload,
+      auth.accessToken,
+      abortController.signal,
+    )
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))
-      throw new Error(err.error || `请求失败 (${response.status})`)
+      const errorCode = err.error_code || ''
+      const providerLabel = form.selectedLlm?.provider || ''
+      throw new Error(llmErrorMessage(errorCode, providerLabel) || err.error || `请求失败 (${response.status})`)
     }
 
     const reader = response.body.getReader()
@@ -227,8 +273,14 @@ const startGeneration = async () => {
         if (data.done) {
           generating.value = false
           if (data.error) {
-            ElMessage.error(data.error || '生成失败，请检查 LLM 配置')
+            const errorCode = data.error_code || ''
+            const usedProvider = data.used_provider || form.selectedLlm?.provider || ''
+            ElMessage.error(llmErrorMessage(errorCode, usedProvider) || data.error || '生成失败，请检查 LLM 配置')
           } else {
+            // Optimistically update preference so next open pre-selects this model
+            if (data.used_provider && data.used_model) {
+              llmStore.updatePreferenceLocally(data.used_provider, data.used_model)
+            }
             autoSaveDraft()
           }
         } else {
@@ -375,6 +427,12 @@ onUnmounted(() => { if (abortController) { abortController.abort(); abortControl
 }
 .param-item :deep(.el-form-item__label) {
   padding-bottom: 6px;
+}
+
+/* LLM selector row – full width below the 3-column params */
+.llm-row {
+  margin-top: 10px;
+  margin-bottom: 4px;
 }
 
 /* Prompt input */

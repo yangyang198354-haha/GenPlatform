@@ -232,3 +232,55 @@ export const mediaAPI = {
   delete: (id) => api.delete(`/media/${id}/`),
   download: (id) => api.get(`/media/${id}/download/`),
 };
+
+// ── LLM API ────────────────────────────────────────────────────────────────
+export const llmAPI = {
+  /**
+   * Fetch available LLM providers and the current user preference.
+   * Corresponds to GET /api/v1/llm/providers/
+   *
+   * Response shape:
+   *   { default, user_preference, providers[], warnings[] }
+   *
+   * @returns {Promise<object>}
+   */
+  getProviders: () =>
+    api.get("/llm/providers/").then((r) => r.data),
+
+  /**
+   * Start an SSE content-generation stream.
+   * Corresponds to POST /api/v1/llm/generate/
+   *
+   * Returns a raw fetch Response so the caller can consume the SSE stream
+   * directly (axios does not support streaming).  The caller must pass the
+   * current JWT accessToken so this helper stays free of store imports.
+   *
+   * @param {object} payload
+   * @param {string}  payload.prompt
+   * @param {string}  payload.platform
+   * @param {string}  payload.style
+   * @param {number|null} payload.word_limit
+   * @param {boolean} payload.use_kb
+   * @param {string|undefined} payload.provider  – omit to let backend resolve default
+   * @param {string|undefined} payload.model      – omit to let backend resolve default
+   * @param {string|null} accessToken  – JWT token from auth store
+   * @param {AbortSignal} [signal]
+   * @returns {Promise<Response>}  raw fetch Response (caller must check .ok)
+   */
+  generateStream: (payload, accessToken, signal) => {
+    const baseURL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+    const url = `${baseURL}/llm/generate/`
+
+    const headers = { 'Content-Type': 'application/json' }
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`
+    }
+
+    return fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal,
+    })
+  },
+};
