@@ -76,6 +76,13 @@ import { ref, watch, computed, onMounted } from 'vue'
 import { WarningFilled, Setting } from '@element-plus/icons-vue'
 import { useLlmStore } from '@/stores/llm'
 
+// Prevent Vue 3 fallthrough attributes from overwriting this component's own
+// data-testid="llm-selector" on the root element.  Without this, a parent that
+// writes <LlmSelector data-testid="workspace-llm-selector" /> would silently
+// replace the root element's testid, causing E2E locator '[data-testid="llm-selector"]'
+// to time out even though the component is mounted and visible.
+defineOptions({ inheritAttrs: false })
+
 // ── Props ──────────────────────────────────────────────────────────────────
 const props = defineProps({
   /**
