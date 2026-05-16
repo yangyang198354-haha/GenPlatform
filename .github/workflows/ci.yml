@@ -271,6 +271,21 @@ jobs:
       - name: Build
         run: npm run build
 
+      # FR-08: 阻止空/损坏的 dist/ 被上传到 artifact store
+      - name: Verify dist artifacts exist
+        run: |
+          DIST_DIR="project_workspace/content_gen_platform/src/frontend/dist"
+          if [ ! -f "$DIST_DIR/index.html" ]; then
+            echo "ERROR: $DIST_DIR/index.html not found. Build may have failed silently."
+            exit 1
+          fi
+          if [ ! -d "$DIST_DIR/assets" ] || [ -z "$(ls -A "$DIST_DIR/assets" 2>/dev/null)" ]; then
+            echo "ERROR: $DIST_DIR/assets/ is missing or empty."
+            exit 1
+          fi
+          echo "OK: dist/index.html and dist/assets/ verified."
+          echo "dist/ size: $(du -sh "$DIST_DIR" 2>/dev/null | cut -f1)"
+
       - uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
@@ -608,8 +623,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 从 GitHub Actions runner 直接 scp 上传源码，绕开服务器 git 依赖。
-      # rm: false 保留服务器上已有的 .env / media / logs 等文件。
+      # FR-01: 下载 Runner 在 build-frontend job 中构建的 dist/ 产物
+      # download 失败（artifact 不存在/网络问题）直接导致 job FAILURE（fail-fast）
+      - name: Download frontend dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: project_workspace/content_gen_platform/src/frontend/dist/
+
+      # FR-03: 写 .runner_built 标记（内容为 commit SHA），deploy_physical.sh
+      # 据此校验 dist/ 来自 Runner（fail-fast 防止静默走旧服务器 build 路径）
+      - name: Mark dist as runner-built
+        run: |
+          MARK=project_workspace/content_gen_platform/src/frontend/dist/.runner_built
+          echo "${{ github.sha }}" > "$MARK"
+          echo "Runner-built marker:"; cat "$MARK"
+          du -sh project_workspace/content_gen_platform/src/frontend/dist/ 2>/dev/null || true
+
+      # 从 GitHub Actions runner 直接 scp 上传源码（含已下载的 dist/），
+      # 绕开服务器 git 依赖。rm: false 保留服务器上已有的 .env / media / logs 等文件。
       - name: Upload source code to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -625,11 +657,12 @@ jobs:
         env:
           RUN_SETUP: ${{ needs.compute-deploy-mode.outputs.run_setup }}
           PUBLIC_HOST: ${{ secrets.PROD_HOST }}
+          SKIP_FRONTEND_BUILD: "1"
         with:
           host: ${{ secrets.PROD_HOST }}
           username: ${{ secrets.PROD_USER }}
           password: ${{ secrets.PROD_PASSWORD }}
-          envs: RUN_SETUP,PUBLIC_HOST
+          envs: RUN_SETUP,PUBLIC_HOST,SKIP_FRONTEND_BUILD
           command_timeout: 90m
           script: |
             set -e

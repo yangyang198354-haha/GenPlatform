@@ -224,67 +224,124 @@ echo "torch==2.3.1+cpu" > /tmp/torch_constraint.txt
 rm -f /tmp/torch_constraint.txt
 log_info "[OK] Python 依赖安装完成"
 
-# ── 步骤 6: 前端构建 ──────────────────────────────────────────────────────────
-log_info "--- 步骤 6/12: 前端构建 ---"
+# ── 步骤 6: 前端构建 / 产物部署 ───────────────────────────────────────────────
+# INC-2026-05-16: 引入 SKIP_FRONTEND_BUILD 分支。CI 触发部署时设为 "1"，
+# Runner 已构建好 dist/ 并 scp 到服务器，此处只校验+复制，不再服务器 build。
+# 未设置时走原路径（本地开发者直接跑脚本时的兼容路径）。
+log_info "--- 步骤 6/12: 前端构建 / 产物部署 ---"
 log_info "FRONTEND_DIR=$FRONTEND_DIR"
+log_info "SKIP_FRONTEND_BUILD=${SKIP_FRONTEND_BUILD:-<unset>}"
 
-# 释放内存：停掉已有服务（避免 npm build OOM）
-# 内存有限的服务器上 gunicorn 4 workers + celery + sentence-transformers 模型 +
-# Vite/Rollup 构建会很容易超内存。restart 在 step 10 重新启动。
-log_info "构建前停止已有服务以释放内存..."
-systemctl stop genplatform-celery 2>/dev/null || true
-systemctl stop genplatform-celery-beat 2>/dev/null || true
-systemctl stop genplatform-backend 2>/dev/null || true
-sync && echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
-log_info "[OK] 服务已停止；构建后将在步骤 10 重新启动"
+if [[ "${SKIP_FRONTEND_BUILD:-0}" == "1" ]]; then
+    # ── 路径 A: Runner 预构建（CI 默认）─────────────────────────────────────
+    # 不停服、不跑 npm、不消耗服务器内存。仅校验 + 复制产物。
+    RUNNER_MARK="$FRONTEND_DIR/dist/.runner_built"
+    DIST_INDEX="$FRONTEND_DIR/dist/index.html"
 
-if [[ -f "$FRONTEND_DIR/package.json" ]]; then
-    # 检查 npm/node 可用性
-    if ! command -v node &>/dev/null; then
-        log_error "node 不可用，请运行 setup_system.sh 安装 Node.js 20"
+    # FR-06 fail-fast: 缺标记或缺 index.html 立即报错，禁止静默降级
+    if [[ ! -f "$RUNNER_MARK" ]]; then
+        log_error "[FATAL] SKIP_FRONTEND_BUILD=1 但 $RUNNER_MARK 不存在"
+        log_error "可能原因：(1) dist/ 未随源码 scp 到服务器；(2) ci.yml 的 download-artifact 未跑"
+        log_error "fallback 已被禁用，请检查 CI 日志后重新触发"
         exit 1
     fi
-    if ! command -v npm &>/dev/null; then
-        log_error "npm 不可用"
+    if [[ ! -f "$DIST_INDEX" ]]; then
+        log_error "[FATAL] $DIST_INDEX 不存在，dist/ 可能为空"
+        log_error "请检查 ci.yml 的 Verify dist artifacts exist 守卫是否生效"
         exit 1
     fi
-    log_info "Node: $(node --version), npm: $(npm --version)"
-    # 确保静态文件目录存在
+
+    BUILD_SHA=$(cat "$RUNNER_MARK" 2>/dev/null || echo "<unknown>")
+    DIST_SIZE=$(du -sh "$FRONTEND_DIR/dist/" 2>/dev/null | cut -f1 || echo "unknown")
+    log_info "[OK] 检测到 Runner 预构建产物"
+    log_info "     SHA: $BUILD_SHA"
+    log_info "     dist/ 大小: $DIST_SIZE"
+
     mkdir -p "$STATIC_DIR"
-    # 不用 --silent，否则错误信息也被吞
-    (
-        cd "$FRONTEND_DIR"
-        # 优先用国内镜像加速 npm install
-        npm config set registry https://registry.npmmirror.com 2>/dev/null || true
-        if [[ -f package-lock.json ]]; then
-            npm ci --no-audit --no-fund
-        else
-            log_warn "[WARN] package-lock.json 缺失，使用 npm install（构建可能不可重现）"
-            npm install --no-audit --no-fund
-        fi
-        # 限制 Node heap 上限，避免 OOM Killer 杀进程（默认 1.7GB，限制为 1GB）
-        NODE_OPTIONS="--max-old-space-size=1024" npm run build
-    ) || {
-        log_error "前端构建失败，请检查 npm 日志"
-        # 显示内存状态帮诊断
-        log_error "当前内存状态："
-        free -h 2>&1 || true
-        log_error "OOM 历史："
-        dmesg 2>/dev/null | grep -i "killed process" | tail -5 || true
-        exit 1
-    }
-    # 清空旧的静态文件（保留 Django collectstatic 子目录）
     rm -rf "${STATIC_DIR:?}/assets" "${STATIC_DIR:?}/index.html" 2>/dev/null || true
     cp -r "$FRONTEND_DIR/dist/." "$STATIC_DIR/"
-    log_info "[OK] 前端构建完成，产物已复制到 $STATIC_DIR"
+    log_info "[OK] 前端产物已从 Runner artifact 复制到 $STATIC_DIR"
+    log_info "     （注：服务未停止，停机窗口已消除）"
+
 else
-    log_warn "[WARN] $FRONTEND_DIR/package.json 不存在，跳过前端构建"
-    # 列出实际目录帮诊断
-    if [[ -d "$FRONTEND_DIR" ]]; then
-        log_warn "  $FRONTEND_DIR 内容:"
-        ls -la "$FRONTEND_DIR" 2>&1 | head -20 || true
+    # ── 路径 B: 服务器端本地构建（向下兼容，本地手工部署用）────────────────
+    log_info "SKIP_FRONTEND_BUILD 未设置，执行服务器端本地构建..."
+
+    # FIX-DEPLOY-D: 内存阈值预检 — 在资源受限服务器上跑 npm build 极易 OOM，
+    # 预先 fail 比 build 跑一半被 kill 给出的诊断信息更明确。
+    if [[ -r /proc/meminfo ]]; then
+        AVAIL_KB=$(awk '/MemAvailable/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
+        AVAIL_MB=$((AVAIL_KB / 1024))
+        MIN_REQUIRED_MB=1024
+        if [[ "$AVAIL_MB" -gt 0 && "$AVAIL_MB" -lt "$MIN_REQUIRED_MB" ]]; then
+            log_error "[FATAL] 可用内存 ${AVAIL_MB}MB < 阈值 ${MIN_REQUIRED_MB}MB"
+            log_error "在资源受限服务器上跑 npm build 极可能 OOM 并连带杀业务进程。建议："
+            log_error "  (1) 通过 CI 触发部署（自动设 SKIP_FRONTEND_BUILD=1 走 Runner build）"
+            log_error "  (2) 给服务器加 swap：gh workflow run add_swap.yml"
+            free -h 2>&1 || true
+            exit 1
+        fi
+        log_info "[OK] 可用内存 ${AVAIL_MB}MB ≥ 阈值 ${MIN_REQUIRED_MB}MB"
+    fi
+
+    # 释放内存：停掉已有服务（避免 npm build OOM）
+    # 内存有限的服务器上 gunicorn 4 workers + celery + sentence-transformers 模型 +
+    # Vite/Rollup 构建会很容易超内存。restart 在 step 10 重新启动。
+    log_info "构建前停止已有服务以释放内存..."
+    systemctl stop genplatform-celery 2>/dev/null || true
+    systemctl stop genplatform-celery-beat 2>/dev/null || true
+    systemctl stop genplatform-backend 2>/dev/null || true
+    sync && echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+    log_info "[OK] 服务已停止；构建后将在步骤 10 重新启动"
+
+    if [[ -f "$FRONTEND_DIR/package.json" ]]; then
+        # 检查 npm/node 可用性
+        if ! command -v node &>/dev/null; then
+            log_error "node 不可用，请运行 setup_system.sh 安装 Node.js 20"
+            exit 1
+        fi
+        if ! command -v npm &>/dev/null; then
+            log_error "npm 不可用"
+            exit 1
+        fi
+        log_info "Node: $(node --version), npm: $(npm --version)"
+        # 确保静态文件目录存在
+        mkdir -p "$STATIC_DIR"
+        # 不用 --silent，否则错误信息也被吞
+        (
+            cd "$FRONTEND_DIR"
+            # 优先用国内镜像加速 npm install
+            npm config set registry https://registry.npmmirror.com 2>/dev/null || true
+            if [[ -f package-lock.json ]]; then
+                npm ci --no-audit --no-fund
+            else
+                log_warn "[WARN] package-lock.json 缺失，使用 npm install（构建可能不可重现）"
+                npm install --no-audit --no-fund
+            fi
+            # 限制 Node heap 上限，避免 OOM Killer 杀进程（默认 1.7GB，限制为 1GB）
+            NODE_OPTIONS="--max-old-space-size=1024" npm run build
+        ) || {
+            log_error "前端构建失败，请检查 npm 日志"
+            # 显示内存状态帮诊断
+            log_error "当前内存状态："
+            free -h 2>&1 || true
+            log_error "OOM 历史："
+            dmesg 2>/dev/null | grep -i "killed process" | tail -5 || true
+            exit 1
+        }
+        # 清空旧的静态文件（保留 Django collectstatic 子目录）
+        rm -rf "${STATIC_DIR:?}/assets" "${STATIC_DIR:?}/index.html" 2>/dev/null || true
+        cp -r "$FRONTEND_DIR/dist/." "$STATIC_DIR/"
+        log_info "[OK] 前端构建完成，产物已复制到 $STATIC_DIR"
     else
-        log_warn "  $FRONTEND_DIR 目录不存在"
+        log_warn "[WARN] $FRONTEND_DIR/package.json 不存在，跳过前端构建"
+        # 列出实际目录帮诊断
+        if [[ -d "$FRONTEND_DIR" ]]; then
+            log_warn "  $FRONTEND_DIR 内容:"
+            ls -la "$FRONTEND_DIR" 2>&1 | head -20 || true
+        else
+            log_warn "  $FRONTEND_DIR 目录不存在"
+        fi
     fi
 fi
 
