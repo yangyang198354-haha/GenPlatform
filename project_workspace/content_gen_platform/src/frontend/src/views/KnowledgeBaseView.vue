@@ -342,12 +342,23 @@ function triggerDirUpload() {
   dirInputRef.value?.click();
 }
 
+// INC-2026-05-16：与后端 MAX_BATCH_UPLOAD_FILES 保持一致
+const MAX_BATCH_UPLOAD_FILES = 2000;
+
 async function handleDirSelected(event) {
   const allFiles = Array.from(event.target.files);
   const supported = allFiles.filter((f) => /\.(pdf|docx|txt|md)$/i.test(f.name));
 
   if (supported.length === 0) {
     ElMessage.error("所选目录中无可导入的文档");
+    event.target.value = "";
+    return;
+  }
+
+  if (supported.length > MAX_BATCH_UPLOAD_FILES) {
+    ElMessage.error(
+      `单次最多上传 ${MAX_BATCH_UPLOAD_FILES} 个文件，本次选择了 ${supported.length} 个，请分批导入`
+    );
     event.target.value = "";
     return;
   }
