@@ -1,0 +1,98 @@
+name: Diagnose KB Upload P1
+
+# 一次性诊断 workflow：确认 2026-05-16 KB 目录上传失败的 P1 根因
+# （MEDIA_ROOT 缺失 / Nginx body size / 今日 backend 错误）
+# 用法: gh workflow run diagnose-kb-upload.yml
+# 完成后: gh run view --log | grep -A30 "=== DIAG-"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    name: Collect KB Upload Diagnostics
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Collect KB upload diagnostics from production server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          password: ${{ secrets.PROD_PASSWORD }}
+          command_timeout: 5m
+          script: |
+            echo "=== KB UPLOAD DIAG START ($(date -Is)) ==="
+
+            # ── DIAG-A: MEDIA_ROOT 环境变量 ──────────────────────────────
+            echo ""
+            echo "=== DIAG-A: MEDIA_ROOT in .env ==="
+            ENV_FILE=/opt/genplatform/app/.env
+            if [ -f "$ENV_FILE" ]; then
+              if grep -q '^MEDIA_ROOT=' "$ENV_FILE"; then
+                grep '^MEDIA_ROOT=' "$ENV_FILE"
+                echo "[OK] MEDIA_ROOT explicitly set"
+              else
+                echo "[MISSING] MEDIA_ROOT not in $ENV_FILE — will fall back to /app/media (Docker path)"
+              fi
+            else
+              echo "[NOT FOUND] $ENV_FILE"
+            fi
+
+            # ── DIAG-B: Nginx client_max_body_size ───────────────────────
+            echo ""
+            echo "=== DIAG-B: nginx client_max_body_size ==="
+            BODY_SIZE=$(nginx -T 2>/dev/null | grep -i 'client_max_body_size' | head -5)
+            if [ -n "$BODY_SIZE" ]; then
+              echo "$BODY_SIZE"
+            else
+              echo "[DEFAULT] client_max_body_size not configured — using nginx default 1M"
+            fi
+
+            # ── DIAG-C: 今日 backend 错误日志 ─────────────────────────────
+            echo ""
+            echo "=== DIAG-C: journalctl backend errors since today ==="
+            journalctl -u genplatform-backend --since today --no-pager 2>/dev/null \
+              | grep -E 'FileNotFoundError|MEDIA_ROOT|/app/media|Permission denied|500|Internal Server Error|Exception' \
+              | tail -30 \
+              || echo "[NO MATCHES] no relevant errors in journal since today"
+
+            # ── DIAG-D: media 目录存在性（生产路径） ──────────────────────
+            echo ""
+            echo "=== DIAG-D: /opt/genplatform/media exists? ==="
+            ls -ld /opt/genplatform/media 2>&1 || echo "[NOT FOUND] /opt/genplatform/media"
+            ls -ld /opt/genplatform/media/documents 2>&1 || echo "[NOT FOUND] /opt/genplatform/media/documents"
+
+            # ── DIAG-E: /app/media 存在性（Docker 默认路径，物理机不应有）─
+            echo ""
+            echo "=== DIAG-E: /app/media exists? (should be NOT FOUND on physical) ==="
+            ls -ld /app/media 2>&1 || echo "[NOT FOUND] /app/media — confirms physical server (no Docker path)"
+
+            # ── DIAG-F: gunicorn-error.log 最近 100 行 ────────────────────
+            echo ""
+            echo "=== DIAG-F: gunicorn-error.log last 100 lines (filtered) ==="
+            tail -200 /opt/genplatform/logs/gunicorn-error.log 2>/dev/null \
+              | grep -E 'FileNotFoundError|MEDIA_ROOT|/app/media|documents|knowledge|upload' \
+              | tail -30 \
+              || echo "[NO MATCHES or LOG MISSING]"
+
+            # ── DIAG-G: nginx access log 今日 4xx/5xx 命中 KB 上传 ────────
+            echo ""
+            echo "=== DIAG-G: nginx access log today — KB upload requests ==="
+            TODAY=$(date +'%d/%b/%Y')
+            (grep "$TODAY" /opt/genplatform/logs/nginx-access.log 2>/dev/null \
+              || grep "$TODAY" /var/log/nginx/access.log 2>/dev/null) \
+              | grep -E 'knowledge.*upload|documents/upload' \
+              | tail -20 \
+              || echo "[NO MATCHES] no KB upload requests today (or log missing)"
+
+            # ── DIAG-H: systemd Environment 是否注入 MEDIA_ROOT ──────────
+            echo ""
+            echo "=== DIAG-H: systemd genplatform-backend Environment ==="
+            systemctl show genplatform-backend -p Environment 2>/dev/null \
+              | tr ' ' '\n' | grep -E 'MEDIA_ROOT|DJANGO_SETTINGS' \
+              || echo "[NONE] no MEDIA_ROOT in systemd unit Environment"
+
+            echo ""
+            echo "=== KB UPLOAD DIAG END ==="
