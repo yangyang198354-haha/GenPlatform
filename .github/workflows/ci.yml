@@ -272,19 +272,20 @@ jobs:
         run: npm run build
 
       # FR-08: 阻止空/损坏的 dist/ 被上传到 artifact store
+      # 注意：build-frontend job 的 defaults.run.working-directory 已经是 frontend/，
+      # 这里用相对路径 dist/ 即可（写完整路径会被双重解析）
       - name: Verify dist artifacts exist
         run: |
-          DIST_DIR="project_workspace/content_gen_platform/src/frontend/dist"
-          if [ ! -f "$DIST_DIR/index.html" ]; then
-            echo "ERROR: $DIST_DIR/index.html not found. Build may have failed silently."
+          if [ ! -f "dist/index.html" ]; then
+            echo "ERROR: dist/index.html not found. Build may have failed silently."
             exit 1
           fi
-          if [ ! -d "$DIST_DIR/assets" ] || [ -z "$(ls -A "$DIST_DIR/assets" 2>/dev/null)" ]; then
-            echo "ERROR: $DIST_DIR/assets/ is missing or empty."
+          if [ ! -d "dist/assets" ] || [ -z "$(ls -A dist/assets 2>/dev/null)" ]; then
+            echo "ERROR: dist/assets/ is missing or empty."
             exit 1
           fi
           echo "OK: dist/index.html and dist/assets/ verified."
-          echo "dist/ size: $(du -sh "$DIST_DIR" 2>/dev/null | cut -f1)"
+          echo "dist/ size: $(du -sh dist 2>/dev/null | cut -f1)"
 
       - uses: actions/upload-artifact@v4
         with:
