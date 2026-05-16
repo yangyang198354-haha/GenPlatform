@@ -120,6 +120,16 @@ class DocumentBatchUploadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # INC-2026-05-16 防御：业务层硬上限。Django 解析层的
+        # DATA_UPLOAD_MAX_NUMBER_FILES 触发时返回空 body 400，用户看不到原因；
+        # 这里在 view 入口拦截并给出明确文案。
+        max_batch = getattr(settings, "MAX_BATCH_UPLOAD_FILES", 2000)
+        if len(files) > max_batch:
+            return Response(
+                {"error": f"单次最多上传 {max_batch} 个文件，请分批导入"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Parse optional relative paths (one per file, same order)
         relative_paths_raw = request.data.get("relative_paths", "[]")
         try:

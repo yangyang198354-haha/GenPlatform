@@ -199,6 +199,14 @@ CHUNK_OVERLAP = 64
 MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB
 USER_STORAGE_QUOTA_BYTES = 2 * 1024 ** 3    # 2 GB
 
+# 目录批量上传硬上限（业务层）+ Django 解析层 override
+# INC-2026-05-16：Django 4.1+ 默认 DATA_UPLOAD_MAX_NUMBER_FILES=100，目录上传
+# 超过 100 文件时请求在 view 入口前就被 Django 拒绝（空 body 400），用户看到
+# "目录上传失败"无任何业务信息。下面三个值必须同步提升，缺一不可。
+MAX_BATCH_UPLOAD_FILES = 2000
+DATA_UPLOAD_MAX_NUMBER_FILES = MAX_BATCH_UPLOAD_FILES        # 每个文件占 1 field
+DATA_UPLOAD_MAX_NUMBER_FIELDS = MAX_BATCH_UPLOAD_FILES + 100  # 余量供 relative_paths 等
+
 # ── Encryption ────────────────────────────────────────────────────────────────
 ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY", "")  # 32-byte base64 key; set in production
 

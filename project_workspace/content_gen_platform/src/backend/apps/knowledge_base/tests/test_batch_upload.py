@@ -843,3 +843,76 @@ class TestBatchUploadAtomicQuotaGuard:
             "used_storage_bytes must not change when quota is 0 and the atomic "
             "UPDATE correctly rejects all files."
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Canary Guards — INC-2026-05-16: Django default upload limits trap
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_django_data_upload_max_number_files_is_raised_above_default():
+    """
+    INC-2026-05-16 regression guard: Django 4.1+ ships
+    DATA_UPLOAD_MAX_NUMBER_FILES = 100 as default. If the project ever
+    loses the explicit override in base.py, directory uploads with more
+    than 100 files silently return an empty-body HTTP 400 from the
+    request parser BEFORE any view runs — the user only sees
+    "目录上传失败" with no actionable info (root cause of INC-2026-05-16).
+
+    Both DATA_UPLOAD_MAX_NUMBER_FILES (one per file) and
+    DATA_UPLOAD_MAX_NUMBER_FIELDS (each file is a form field, plus the
+    relative_paths field) must be lifted in sync — raising only one of
+    them still leaves the other binding at its low default.
+    """
+    from django.conf import settings as dj_settings
+
+    assert getattr(dj_settings, "DATA_UPLOAD_MAX_NUMBER_FILES", 100) >= 2000, (
+        "DATA_UPLOAD_MAX_NUMBER_FILES must be raised in settings to support "
+        "directory uploads with up to MAX_BATCH_UPLOAD_FILES files. Django's "
+        "default of 100 causes a confusing empty-body 400 (INC-2026-05-16)."
+    )
+    assert getattr(dj_settings, "DATA_UPLOAD_MAX_NUMBER_FIELDS", 1000) >= 2000, (
+        "DATA_UPLOAD_MAX_NUMBER_FIELDS must be raised in sync — each uploaded "
+        "file is a separate form field, so this limit also binds during "
+        "directory uploads."
+    )
+    assert getattr(dj_settings, "MAX_BATCH_UPLOAD_FILES", None) is not None, (
+        "MAX_BATCH_UPLOAD_FILES business constant must be defined; the view "
+        "uses it to return a friendly 400 instead of relying on Django's "
+        "empty-body 400 from the parser layer."
+    )
+
+
+@pytest.mark.django_db
+@pytest.mark.integration
+class TestBatchUploadFileCountGuard:
+    """
+    INC-2026-05-16 regression guard: view-level MAX_BATCH_UPLOAD_FILES check.
+
+    Even with Django's parser limits raised, the view must enforce a
+    business hard cap so a user (or compromised frontend) cannot send a
+    pathologically large batch and exhaust server resources. The 400
+    response must include a clear message; the previous failure mode was
+    an empty-body 400 from Django's parser which gave the user no clue.
+    """
+
+    @patch("apps.knowledge_base.views.process_document_task")
+    def test_batch_upload_rejects_over_limit_with_clear_message(
+        self, mock_task, auth_client, settings, tmp_path
+    ):
+        settings.MEDIA_ROOT = str(tmp_path)
+        settings.MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024
+        settings.MAX_BATCH_UPLOAD_FILES = 3  # shrink for test speed
+
+        client, _ = auth_client
+        files = [_fake_file(f"doc{i}.txt", b"x") for i in range(4)]
+
+        resp = client.post(BATCH_URL, data={"files": files}, format="multipart")
+
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        error = resp.data.get("error", "")
+        assert "3" in error, (
+            f"Error message must mention the configured limit (3), got: {error!r}"
+        )
+        # Must NOT be confused with "no supported documents" generic message
+        assert "未包含受支持的文档" not in error
+        mock_task.delay.assert_not_called()
