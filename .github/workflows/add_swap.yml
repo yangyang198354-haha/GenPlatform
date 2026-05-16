@@ -1,0 +1,99 @@
+name: Add Production Swap (4GB)
+
+# 一次性运维 workflow：给 1.8GB 物理内存的生产机加 4GB swap。
+# 起因 INC-2026-05-16：前端 build 阶段 node 进程 OOM 被 kill，连带
+# 多个 celery worker 被杀。在 FIX-DEPLOY-B（build 迁到 Runner）
+# 上线之前，先用 swap 作过渡期兜底。
+# 幂等：已存在 /swapfile 且已 swapon 则跳过。
+# 用法: gh workflow run add_swap.yml
+
+on:
+  workflow_dispatch:
+
+jobs:
+  add-swap:
+    name: Add 4GB swap to production server
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Create / enable swap on production server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          password: ${{ secrets.PROD_PASSWORD }}
+          command_timeout: 10m
+          script: |
+            set -e
+            SWAPFILE=/swapfile
+            SIZE_GB=4
+
+            echo "=== STEP 1: pre-state ==="
+            free -h
+            swapon --show || echo "[INFO] no swap currently"
+
+            echo ""
+            echo "=== STEP 2: check if swap already configured ==="
+            if [ -f "$SWAPFILE" ] && swapon --show | grep -q "$SWAPFILE"; then
+              echo "[SKIP] $SWAPFILE already exists and is active — nothing to do"
+              free -h
+              exit 0
+            fi
+
+            if [ -f "$SWAPFILE" ] && ! swapon --show | grep -q "$SWAPFILE"; then
+              echo "[INFO] $SWAPFILE exists but not active — attempting swapon"
+              sudo swapon "$SWAPFILE" || {
+                echo "[WARN] swapon failed, will recreate the file"
+                sudo rm -f "$SWAPFILE"
+              }
+            fi
+
+            echo ""
+            echo "=== STEP 3: ensure free space ==="
+            AVAIL_KB=$(df --output=avail / | tail -1)
+            NEED_KB=$((SIZE_GB * 1024 * 1024 + 1024 * 1024))  # +1GB margin
+            if [ "$AVAIL_KB" -lt "$NEED_KB" ]; then
+              echo "[ERROR] not enough free space on /: ${AVAIL_KB}KB available, need ${NEED_KB}KB"
+              df -h /
+              exit 1
+            fi
+            echo "[OK] free space sufficient: $((AVAIL_KB / 1024 / 1024))GB available"
+
+            echo ""
+            echo "=== STEP 4: allocate ${SIZE_GB}GB swap file ==="
+            if [ ! -f "$SWAPFILE" ]; then
+              if ! sudo fallocate -l ${SIZE_GB}G "$SWAPFILE" 2>/dev/null; then
+                echo "[INFO] fallocate failed (likely fs limitation), falling back to dd"
+                sudo dd if=/dev/zero of="$SWAPFILE" bs=1M count=$((SIZE_GB * 1024)) status=progress
+              fi
+            fi
+            sudo chmod 600 "$SWAPFILE"
+
+            echo ""
+            echo "=== STEP 5: mkswap + swapon ==="
+            sudo mkswap "$SWAPFILE"
+            sudo swapon "$SWAPFILE"
+
+            echo ""
+            echo "=== STEP 6: persist to /etc/fstab ==="
+            if ! grep -qF "$SWAPFILE" /etc/fstab; then
+              echo "$SWAPFILE none swap sw 0 0" | sudo tee -a /etc/fstab
+              echo "[OK] fstab entry added"
+            else
+              echo "[SKIP] fstab entry already exists"
+            fi
+
+            echo ""
+            echo "=== STEP 7: tune swappiness (low — only as OOM safety net) ==="
+            sudo sysctl vm.swappiness=10
+            if ! grep -qE '^vm\.swappiness' /etc/sysctl.conf; then
+              echo "vm.swappiness=10" | sudo tee -a /etc/sysctl.conf
+            fi
+
+            echo ""
+            echo "=== STEP 8: post-state verification ==="
+            free -h
+            swapon --show
+            cat /etc/fstab | grep swap
+            echo "[OK] swap is active and persisted"
