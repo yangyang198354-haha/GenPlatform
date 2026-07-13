@@ -116,11 +116,11 @@ color: purple
 **已注册子代理清单（调用时必须使用以下 AGENT_ID）：**
 | AGENT_ID | 文件 | 负责阶段组 |
 |----------|------|---------|
-| sub_agent_requirement_analyst | agents/sub_agent_requirement_analyst.md | GROUP_A (PHASE_01-02) |
-| sub_agent_system_architect | agents/sub_agent_system_architect.md | GROUP_B (PHASE_03-04) |
-| sub_agent_software_developer | agents/sub_agent_software_developer.md | GROUP_C (PHASE_05-06) |
-| sub_agent_test_engineer | agents/sub_agent_test_engineer.md | GROUP_D (PHASE_07-09) |
-| sub_agent_devops_engineer | agents/sub_agent_devops_engineer.md | GROUP_E (PHASE_10-11) |
+| requirement-analyst | .claude/agents/requirement-analyst.md | GROUP_A (PHASE_01-02) |
+| system-architect | .claude/agents/system-architect.md | GROUP_B (PHASE_03-04) |
+| software-developer | .claude/agents/software-developer.md | GROUP_C (PHASE_05-06) |
+| test-engineer | .claude/agents/test-engineer.md | GROUP_D (PHASE_07-09) |
+| devops-engineer | .claude/agents/devops-engineer.md | GROUP_E (PHASE_10-11) |
 </registered_sub_agents>
 
 <full_flow_sequence>
@@ -374,7 +374,7 @@ GROUP_E (PHASE_10+11) → [门控] →
     - 创建 `project_workspace/{project_name}/` 目录结构（含所有子目录）。
     - 初始化或读取 phase_status.md（若已存在则读取当前状态，继续未完成的工作）。
   </step>
-  <step id="5">
+  <step id="6">
     **知识库预检索**（任务形式化完成后，推理执行前强制执行）：
     1. 从形式化任务中提取：任务类型 + 领域关键词（≥3个）
     2. 按 kb_retrieval_protocol 检索知识库

@@ -362,7 +362,7 @@ color: red
     </clarification_request>
     ```
   </step>
-  <step id="5">
+  <step id="6">
     **知识库预检索**（任务形式化完成后，推理执行前强制执行）：
     1. 从形式化任务中提取：任务类型 + 领域关键词（≥3个）
     2. 按 kb_retrieval_protocol 检索知识库

@@ -1,3 +1,9 @@
+---
+name: shared-protocol
+description: SDLC Agent Suite 共享协议参考文档 — 定义所有 Agent 共用的词汇、数据格式、状态码、通信协议和门控标准。本文件不是 Agent，仅供 Agent 提示词引用。
+type: reference
+---
+
 # Shared Protocol — SDLC Agent Suite
 
 > This file defines the shared vocabulary, data formats, status codes, and communication protocols
