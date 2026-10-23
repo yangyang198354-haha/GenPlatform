@@ -1,4 +1,4 @@
-# SDLC Agent Suite v3.3 — 安装
+# SDLC Agent Suite v3.4 — 安装
 
 1. 把 `.claude/agents/`、`.claude/hooks/` 复制到目标仓库的 `.claude/` 下（已有旧版先备份）。
 2. 把 `settings.example.json` 中的 `hooks` 与 `permissions` 合并进目标仓库的 `.claude/settings.json`：
@@ -9,4 +9,5 @@
    - 没有 `project_profile.md` 时，PM 扫描仓库生成画像初稿，逐项请你确认后再开始。
 4. 记忆：每个 agent 的项目记忆在 `.claude/agent-memory/{agent}/MEMORY.md`，首次运行自动创建（需开启 Claude Code 的 auto memory，默认开启）。
 5. 知识蒸馏：PM 交付后自动调用 kb-curator；也可以随时 `claude --agent kb-curator`。报告在 `project_workspace/_kb_distillation/`。
-6. 建议把项目禁用的工具在 settings.json 里设为 deny。
+6. 评审或生成 agent：`claude --agent agent-builder`，或在主会话中调用。它默认不写文件；需要落盘时在请求里写 `WRITE_TARGET: <路径>`（覆盖已有文件另加 `OVERWRITE_AUTHORIZED: <路径>`）。
+7. 建议把项目禁用的工具在 settings.json 里设为 deny。

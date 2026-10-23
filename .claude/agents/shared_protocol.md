@@ -40,6 +40,7 @@ nested（缺省）                                   flat（全部放在 {DOCS} 
 | test-engineer | `testing/` + 画像 P3 规定位置的**测试代码与测试数据**；不得改产品代码 |
 | devops-engineer | `deployment/` + 画像 P7 声明的 CI/部署配置文件（仅当 module_design 或 PM 明确要求改动它们时） |
 | kb-curator | 所有 agent 的记忆目录 `.claude/agent-memory/*/`、`project_workspace/_kb_distillation/`；`knowledge_base/generic/`（仅用户确认后） |
+| agent-builder（辅助成员，不属于任何阶段） | 默认不写；仅写调用方以 `WRITE_TARGET: <路径>` 指定的路径（已存在需 `OVERWRITE_AUTHORIZED`，APPROVED 需 `REWORK_AUTHORIZED`），见 agent-builder §2-5 |
 | 所有 agent | 自己的记忆目录 `.claude/agent-memory/{agent}/` 中 `MEMORY.md` 的"待验证"区（§M-2） |
 
 - 子代理不得修改其他 agent 的产物，除非 PM 在 `special_instructions` 中写明 `REWORK_AUTHORIZED: <路径>`。
@@ -301,7 +302,7 @@ DEPLOY_RESULT : DEPLOYED_SUCCESSFULLY | DEPLOYED_WITH_ISSUES | DEPLOYMENT_FAILED
 ## 待验证
 - [P-{缩写}-NNN] {一句话} — 自记 {日期} · 证据 {可空}
 ```
-- agent 缩写：PM / RA / SA / SD / TE / DE。
+- agent 缩写：PM / RA / SA / SD / TE / DE / KC（kb-curator）/ AB（agent-builder）。
 - agent 在工作中发现**有证据的**可复用经验时，可直接追加到自己的"待验证"区（每次调用最多 3 条），同时照常写进 `<kb_proposals>`。不得改动"已验证"和"用户偏好"区。
 - 用户在对话中表达的偏好或禁止（"以后不要…""我们一律…"）由 PM 写进 PM 记忆的"用户偏好与禁止项"，并在相关调用的 `special_instructions` 中下发。
 - **不得写入记忆**：凭据和个人信息（§L-2）、临时状态（进行中的任务、某次运行的数字）、未经证实的猜测、画像中已有的事实。

@@ -13,7 +13,8 @@ import re
 import sys
 
 SDLC = {"requirement-analyst", "system-architect", "software-developer",
-        "test-engineer", "devops-engineer", "kb-curator"}
+        "test-engineer", "devops-engineer", "kb-curator",
+        "agent-builder"}
 SECRET = re.compile(
     r"(sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}"
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----|(?i:password|passwd|secret|token)\s*[=:]\s*\S+)")

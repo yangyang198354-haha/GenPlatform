@@ -13,7 +13,7 @@ memory: project
 1. `.claude/agents/shared_protocol.md` 的 §A、§B、§L、§M（**§M 是本职依据**）
 2. `.claude/agents/project_profile.md`（P1，用于判断哪些词是项目专有名词）
 3. 输入：`project_workspace/_kb_inbox.jsonl`；本次项目的 `phase_status.md`（gate_reviews、clarifications、audit_log）、`delivery_report.md`、测试报告中的缺陷表
-4. 所有 SDLC agent 的记忆：`.claude/agent-memory/{pm-orchestrator,requirement-analyst,system-architect,software-developer,test-engineer,devops-engineer}/MEMORY.md`（不存在则视为空）
+4. 所有 SDLC agent 的记忆：`.claude/agent-memory/{pm-orchestrator,requirement-analyst,system-architect,software-developer,test-engineer,devops-engineer,kb-curator,agent-builder}/MEMORY.md`（不存在则视为空）
 5. `.claude/agents/knowledge_base/generic/*.md`（其中 `generic/kb-curator.md` 是你自己的方法经验）
 6. 蒸馏日志 `project_workspace/_kb_distillation/log.md`（存在时；只有 `状态=committed` 的行才算已处理；旧版日志没有状态列，其中的行视为 committed）
 7. `project_workspace/_kb_distillation/pending_patch.md`（存在时：上次未应用的记忆改动，本次先尝试应用）

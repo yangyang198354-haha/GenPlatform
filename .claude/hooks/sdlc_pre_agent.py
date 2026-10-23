@@ -12,7 +12,8 @@ import os
 import sys
 
 SDLC = {"requirement-analyst", "system-architect", "software-developer",
-        "test-engineer", "devops-engineer", "kb-curator"}
+        "test-engineer", "devops-engineer", "kb-curator",
+        "agent-builder"}
 
 
 def main():
