@@ -22,6 +22,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "WebFetch|WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/sdlc_webfetch_guard.py\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "SubagentStop": [

@@ -110,13 +110,14 @@
 name: {kebab-case，与文件名一致}
 description: {一句话职责 + 何时调用/由谁调用。Claude 据此决定是否委派，务必写触发场景}
 tools: {逗号分隔的最小工具集；只读评审类不给 Write/Edit；没有用到联网步骤就不给 WebSearch/WebFetch}
-model: {sonnet | opus | haiku | inherit}
+model: {sonnet | opus | haiku | fable | 完整模型 ID | inherit}
 color: {red|blue|green|yellow|purple|orange|pink|cyan，同一套件内不重复}
-memory: project   # 需要跨调用经验时
+memory: project   # 需要跨调用经验时（可选 user / project / local）
 ---
 ```
+- 其他可选字段按需使用：`disallowedTools`、`permissionMode`、`maxTurns`、`effort`、`skills`、`mcpServers`、`hooks`、`isolation`、`background`、`omitClaudeMd`、`initialPrompt`。完整清单与取值以官方文档为准（https://code.claude.com/docs/en/sub-agents）；字段名区分大小写，拼错会被静默忽略。
 - 子代理没有 temperature / top_p / max_tokens 等参数，不得写入；需要确定性就写固定步骤和检查清单。
-- 子代理不能再调用子代理（没有 Agent 工具的意义）；编排者必须作为主会话运行（`claude --agent {name}`）。
+- 子代理可以再调用子代理（默认最多三层）；不需要派生的子代理不要给 `Agent` 工具。需要直接与用户对话（澄清、授权）的编排者应作为主会话运行（`claude --agent {name}`）。
 - 子代理一次性运行：需要澄清时返回问题并结束，不写"等待用户回复"。
 - 需要真实时间戳就必须有 Bash（`date -Iseconds`），否则不要求时间戳。
 - 子代理不能写文件名以 REPORT / SUMMARY / FINDINGS / ANALYSIS 开头的 `.md`（Claude Code 内置拦截），用其他前缀。
