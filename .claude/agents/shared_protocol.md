@@ -2,7 +2,8 @@
 
 > 本文件是 SDLC 套件所有 agent 的共享契约，**与具体项目无关**。项目事实（目录、命令、环境、禁用操作、约定）一律写在
 > `.claude/agents/project_profile.md`（下称"画像"，章节记为 P1…P10）。本文件不是 agent 定义（无 frontmatter）。
-> 子代理开始工作前必须 Read 本文件的 §A、§B、§E、§L 以及自己 GROUP 在 §J 中的标准；PM 需要通读。
+> 子代理开始工作前必须 Read 本文件的 §A、§B、§E、§L、§M 以及自己 GROUP 在 §J 中的标准；PM 需要通读。
+> 例外：agent-builder（辅助成员，不属于任何阶段）按其定义 §1 的必读清单执行，不读 §B、§J 与画像（除非目标用于具体项目）。
 
 ---
 
@@ -159,7 +160,7 @@ DEPLOY_RESULT : DEPLOYED_SUCCESSFULLY | DEPLOYED_WITH_ISSUES | DEPLOYMENT_FAILED
 ```
 
 **§E-1 必读清单**（PM 填入 `<required_reading>`，**所有路径一律写相对仓库根的完整路径**（如 `.claude/agents/shared_protocol.md`、`project_workspace/{project}/requirements/user_stories.md`），不要写相对 `{DOCS}` 的路径；子代理的**第一批工具调用**必须是 Read 这些文件，并在 `<notes>` 中列出）：
-- 所有子代理：`shared_protocol.md`、`project_profile.md`、`knowledge_base/generic/{agent}.md`
+- 所有阶段子代理：`shared_protocol.md`、`project_profile.md`、`knowledge_base/generic/{agent}.md`（agent-builder 例外，见其 §1）
 - 项目经验在 agent 记忆中（§M），`MEMORY.md` 会自动注入，无需 Read；其中引用的主题文件按需 Read
 - 画像 P10 为该 agent 额外列出的文件（如项目的部署/测试 skill）
 - 本 GROUP 的全部 input_files
