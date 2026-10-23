@@ -1,4 +1,4 @@
-# SDLC Agent Suite v3.4 — 安装
+# SDLC Agent Suite v3.4.1 — 安装
 
 1. 把 `.claude/agents/`、`.claude/hooks/` 复制到目标仓库的 `.claude/` 下（已有旧版先备份）。
 2. 把 `settings.example.json` 中的 `hooks` 与 `permissions` 合并进目标仓库的 `.claude/settings.json`：

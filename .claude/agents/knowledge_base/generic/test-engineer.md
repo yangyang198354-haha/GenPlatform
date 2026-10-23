@@ -11,14 +11,14 @@
 - 模块级缓存、单例、全局配置会跨用例污染：在 teardown 中重置。
 - 不写死本机绝对路径；可选依赖缺失时用 skip 守卫并写原因。
 - 外部 LLM / 付费 API 必须 mock。
-- 输出形状依赖输入的函数（如按输入条数返回向量）用 `side_effect` 动态生成，不要用固定 `return_value`。
-- 资源约束参数（batch_size、timeout、soft_time_limit）用 `call_args` 断言，防止被无意改掉。
+- 【适用：Python unittest.mock】输出形状依赖输入的函数（如按输入条数返回向量）用 `side_effect` 动态生成，不要用固定 `return_value`。
+- 【适用：Python unittest.mock】资源约束参数（batch_size、timeout、soft_time_limit）用 `call_args` 断言，防止被无意改掉。
 - 冒烟/E2E 中写入持久存储的数据（用户名、邮箱等唯一字段）必须用时间戳等唯一化，生产/共享环境数据不会被清空。
 - 生产与测试环境行为可能不同（错误密码返回 401 还是 400、限流是否开启、数据是否保留），冒烟断言按目标环境写。
 
 ## E2E（浏览器）
-- 选择器按 UI 真实文本，不要猜（"注册" vs 实际按钮"创建账号"）。
-- Playwright strict mode：`getByText` 匹配多个元素会报错，用 role + name 或更精确的定位。
+- 选择器按 UI 真实文本，先读页面源码或快照，不要按需求里的叫法猜按钮文字。
+- 【适用：Playwright】strict mode 下`getByText` 匹配多个元素会报错，用 role + name 或更精确的定位。
 - 复合组件（下拉选择等）不能直接点内部 input，按组件的交互方式操作。
 - 调试先分类：超时型（元素找不到 → 查选择器/文本）与断言型（元素存在但不符 → 查 class/属性）。
-- ESM 项目中 Playwright 配置也要用 ESM（`require` 会导致全部超时）。
+- 【适用：Playwright + ESM 项目】Playwright 配置也要用 ESM（`require` 会导致全部超时）。
