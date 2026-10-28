@@ -1,7 +1,7 @@
 # Shared Protocol — SDLC Agent Suite (v3, 通用)
 
 > 本文件是 SDLC 套件所有 agent 的共享契约，**与具体项目无关**。项目事实（目录、命令、环境、禁用操作、约定）一律写在
-> `.claude/agents/project_profile.md`（下称"画像"，章节记为 P1…P10）。本文件不是 agent 定义（无 frontmatter）。
+> `.claude/agents/project_profile.md`（下称"画像"，章节记为 P1…P11）。本文件不是 agent 定义（无 frontmatter）。
 > 子代理开始工作前必须 Read 本文件的 §A、§B、§E、§L、§M 以及自己 GROUP 在 §J 中的标准；PM 需要通读。
 > 例外：agent-builder（辅助成员，不属于任何阶段）按其定义 §1 的必读清单执行，不读 §B、§J 与画像（除非目标用于具体项目）。
 
@@ -163,6 +163,7 @@ DEPLOY_RESULT : DEPLOYED_SUCCESSFULLY | DEPLOYED_WITH_ISSUES | DEPLOYMENT_FAILED
 - 所有阶段子代理：`shared_protocol.md`、`project_profile.md`、`knowledge_base/generic/{agent}.md`（agent-builder 例外，见其 §1）
 - 项目经验在 agent 记忆中（§M），`MEMORY.md` 会自动注入，无需 Read；其中引用的主题文件按需 Read
 - 画像 P10 为该 agent 额外列出的文件（如项目的部署/测试 skill）
+- 画像 P11 不为"无"时（§N）：按本次需求涉及的硬件、算法、API，挑出 P11 中对应的资料。A、B、C 带上相关的规范、数据手册、API 文档；D 带上数值验收所在的 P11-2 小节、golden data 说明和 P11-1 测试能力表；E1 涉及烧录或固件发布时带上 P11-1。资料太大时写到章节或页码范围，不要整本塞进去
 - 本 GROUP 的全部 input_files
 
 子代理是一次性调用：返回 `CLARIFICATION_NEEDED` 即结束，**不会等待回复**；PM 获取答案后在 `special_instructions` 中带上答案重新调用。
@@ -248,10 +249,10 @@ DEPLOY_RESULT : DEPLOYED_SUCCESSFULLY | DEPLOYED_WITH_ISSUES | DEPLOYMENT_FAILED
 
 | GROUP | PASS 条件（全部满足） | 任一即 FAIL |
 |---|---|---|
-| A | 每条需求有来源（用户原文或现有系统 `文件:行`）；AC 全部 Given/When/Then；无技术实现内容；`[INFERRED]` 已在"待确认推断项"中汇总 | 缺来源；AC 非 G/W/T；`[INFERRED]` 超过画像 P5 上限（缺省 20%）；含技术实现 |
-| B | 每条 REQ-FUNC 被模块覆盖；无循环依赖；每个 ADR 有 Status，且有 ≥2 个方案**或**标 `constraint-driven` 并写明约束来源；接口有类型签名；含"数据迁移"与"受影响的运行单元"小节；引用的现有代码真实存在 | 覆盖缺口；循环依赖；无依据的单方案 ADR；违反画像 P8 的禁用技术；引用不存在的代码 |
-| C | MOD 全部实现；无未解决 CRITICAL；MAJOR 遗留 >3 条时逐条写明原因；**PM 亲自运行相关测试无新增失败**；迁移符合画像 P6 约定；改动范围与 implementation_plan 一致 | 未实现模块；CRITICAL 遗留；PM 复跑出现新增失败；无关文件改动；违反画像 P6 |
-| D | 三层报告齐全；每个 Must Have 的 US 至少 1 个**真实执行**的用例；**PM 亲自复跑结果与报告一致**；层间门控按 §K 满足；critical path 覆盖率达标 | 报告与复跑不符；按 §K 判定不达标；PASS 无执行证据；metrics 算术不一致 |
+| A | 每条需求有来源（用户原文或现有系统 `文件:行`）；AC 全部 Given/When/Then；无技术实现内容；`[INFERRED]` 已在"待确认推断项"中汇总 | 缺来源；AC 非 G/W/T；`[INFERRED]` 超过画像 P5 上限（缺省 20%）；含技术实现；P11-2 数值指标涉及的功能，其 AC 没有写出阈值 |
+| B | 每条 REQ-FUNC 被模块覆盖；无循环依赖；每个 ADR 有 Status，且有 ≥2 个方案**或**标 `constraint-driven` 并写明约束来源；接口有类型签名；含"数据迁移"与"受影响的运行单元"小节；引用的现有代码真实存在 | 覆盖缺口；循环依赖；无依据的单方案 ADR；违反画像 P8 的禁用技术；引用不存在的代码；§N 领域事实无出处，或出处与原文不符 |
+| C | MOD 全部实现；无未解决 CRITICAL；MAJOR 遗留 >3 条时逐条写明原因；**PM 亲自运行相关测试无新增失败**；迁移符合画像 P6 约定；改动范围与 implementation_plan 一致 | 未实现模块；CRITICAL 遗留；PM 复跑出现新增失败；无关文件改动；违反画像 P6；代码用到 module_design 没有出处的闭源 API 用法或硬件寄存器/地址（§N-2） |
+| D | 三层报告齐全；每个 Must Have 的 US 至少 1 个**真实执行**的用例；**PM 亲自复跑结果与报告一致**；层间门控按 §K 满足；critical path 覆盖率达标 | 报告与复跑不符；按 §K 判定不达标；PASS 无执行证据；metrics 算术不一致；P11-2 数值指标无对应用例或容限与画像不符；执行了画像未允许的 hil 测试或真实 API 调用 |
 | E1 | cicd_pipeline 与 deployment_plan 齐全；每个 DEPLOY 有 ROLLBACK（不可逆的标 `[MANUAL_ROLLBACK_REQUIRED]`）；预检清单完整；部署策略与环境矩阵符合画像 P7；有部署后验证；回滚方式不破坏目标机本地状态 | 缺回滚；出现画像 P8 禁用操作；设计了画像中不存在的环境；无验证清单；回滚步骤依赖未核验的变量 |
 | E2 | deployment_report 为 DEPLOYED_SUCCESSFULLY 且验证项全部有实际结果 | 其他状态（DEPLOYED_WITH_ISSUES 由用户决定是否接受） |
 
@@ -268,6 +269,8 @@ DEPLOY_RESULT : DEPLOYED_SUCCESSFULLY | DEPLOYED_WITH_ISSUES | DEPLOYMENT_FAILED
   - **threshold**（FULL_FLOW 缺省）：单元通过率 ≥ `unit_pass`（缺省 0.80）才进入集成；集成 ≥ `integration_pass`（缺省 0.90）才进入 E2E；E2E critical path（Must Have 故事的 E2E 用例）通过率 ≥ `critical_path`（缺省 1.00）；可选覆盖率 `coverage_min`。
   - **baseline**（INCREMENTAL 缺省）：每层相对基线**零新增失败**且新写用例全部通过，才进入下一层。基线 = 改动前实跑结果，或画像 P4 声明的已知既有失败（以实跑为准）；既有失败单列，不算新增。critical path 规则同上。
 - 没有真实运行输出的用例**不得标 PASS**，只能标 BLOCKED 并说明原因（"静态审查"不是执行）。
+- **硬件相关用例**（画像 P11-1）：每条用例标运行方式 `sim | hil | manual`。sim 和允许的 hil 照常计数；manual 用例标 NOT_TESTABLE，不计入通过率分母，但必须写进人工验证清单（步骤、期望结果、所需设备）。critical path 中的 manual 用例单独计数为"待人工验证"，只要还有未完成的人工验证，最终状态至多 DELIVERED_WITH_ISSUES。
+- **数值类用例**（画像 P11-2）：断言使用画像给出的容限和口径，不自行放宽或收紧；对照数据来自 golden data 或参考实现，不能用被测代码自己的输出生成期望值。
 
 ---
 
@@ -324,3 +327,40 @@ DEPLOY_RESULT : DEPLOYED_SUCCESSFULLY | DEPLOYED_WITH_ISSUES | DEPLOYMENT_FAILED
 - PM 在写完 `delivery_report.md` 后调用 kb-curator（PHASE_12）；用户也可随时单独运行 `kb-curator`。
 - 子代理不能写文件名以 report / summary / findings / analysis 开头的 `.md`（Claude Code 内置拦截），产出文件不要用这类前缀（`*_report.md` 这种后缀形式不受影响）。
 - 无人值守时 `.claude/` 可能不可写：kb-curator 把本应写入的改动写成 `project_workspace/_kb_distillation/pending_patch.md`，由用户下次交互时应用。
+
+---
+
+## N. 领域与外部依赖（画像 P11）
+
+画像 P11 记录的是模型自身知识靠不住的事实：专用硬件、细分领域算法、闭源或内部 API。P11 整节为"无"时本节不适用。
+
+### N-1. 出处标记
+以下事实写进任何产物（需求、设计、代码注释、测试）时，都要标出处：
+- 硬件：寄存器地址与位定义、时序、引脚、中断号、电气或时钟限制、外设初始化顺序
+- 算法：公式、系数与参数、数值精度、定点格式、边界与异常值的处理
+- 闭源 API：端点、方法、字段与类型、错误码、调用顺序、鉴权方式、限流与副作用
+
+出处只认两种：
+- `[P11: 文件:位置]`：P11 列出的资料（位置写行号、章节号、表号或页码）
+- `[CODE: 文件:行]`：仓库里现有、能工作的调用或实现
+
+**模型自身的知识不是出处。** 找不到出处的写 `[UNSOURCED]`，处理方式见 N-2。
+
+### N-2. 找不到出处时
+| 阶段 | 处理 |
+|---|---|
+| 需求（A） | 当作 `[INFERRED]`，计入占比，列进"待确认推断项" |
+| 架构（B） | 影响接口契约的（签名、字段、寄存器、时序）→ `CLARIFICATION_NEEDED`（priority=CRITICAL），请用户补资料或确认；不影响契约的细节写进"开放问题" |
+| 开发（C） | 不得自行补全。只缺非关键细节 → 写 stub（`TODO(IFC-NNN): [UNSOURCED] …`）并列进开放问题；缺的是关键用法 → `CLARIFICATION_NEEDED` |
+| 测试（D） | 期望值缺出处的用例标 BLOCKED（`[DATA_REQUIRED: 出处]`），不自己编期望值 |
+
+### N-3. 联网
+- 闭源或内部 API、内部硬件资料：**不得联网搜索**（§L-7，查询会暴露内部信息，而且查到的也不是权威来源）。
+- 公开的标准、公开芯片的数据手册、公开论文可以查，标 `[WEB: URL，访问日期]`；与 P11 资料冲突时以 P11 为准，并在开放问题中写出差异。
+
+### N-4. 测试与安全
+- 硬件相关和数值类用例的计数口径见 §K。
+- hil 测试只在画像 P11-1 写明命令且"子代理可执行=是"时运行；P11-1 的硬件禁止操作同时视为 P8 禁用项。
+- 闭源 API 的测试只用画像 P11-3 写明的测试替身（mock 或沙箱）；测试替身是"无"时，集成到该 API 的用例标 NOT_TESTABLE 并写进人工验证清单，不得调用真实端点。
+- 凭据只写存放位置，不写值（§L-2）。
+

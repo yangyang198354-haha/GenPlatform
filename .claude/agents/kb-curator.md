@@ -11,7 +11,7 @@ memory: project
 
 ## 1. 开始前必读（在 `<notes>` 中列出已读文件）
 1. `.claude/agents/shared_protocol.md` 的 §A、§B、§E、§L、§M（**§M 是本职依据**）
-2. `.claude/agents/project_profile.md`（P1，用于判断哪些词是项目专有名词）
+2. `.claude/agents/project_profile.md`（P1、P11，用于判断哪些词是项目专有名词：P11 中的硬件型号、内部 API 名、内部算法名都不能进通用知识）
 3. 输入：`project_workspace/_kb_inbox.jsonl`；本次项目的 `phase_status.md`（gate_reviews、clarifications、audit_log）、`delivery_report.md`、测试报告中的缺陷表
 4. 所有 SDLC agent 的记忆：`.claude/agent-memory/{pm-orchestrator,requirement-analyst,system-architect,software-developer,test-engineer,devops-engineer,kb-curator,agent-builder}/MEMORY.md`（不存在则视为空）
 5. `.claude/agents/knowledge_base/generic/*.md`（其中 `generic/kb-curator.md` 是你自己的方法经验）

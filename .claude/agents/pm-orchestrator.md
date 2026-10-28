@@ -55,10 +55,16 @@ memory: project
 ## 2. 画像引导（project_profile.md 不存在或 status=DRAFT 时）
 
 1. 只读扫描仓库：`CLAUDE.md`、`README*`、依赖清单（`requirements*.txt`、`pyproject.toml`、`package.json`、`go.mod`、`pom.xml`…）、`git ls-files` 目录分布、测试目录与配置、CI 配置（`.github/workflows/`、`.gitlab-ci.yml`…）、部署相关目录（`deploy/`、`systemd/`、`Dockerfile`、`docker-compose*`、`k8s/`）、`.claude/skills/`。
+   同时找 P11 信号（命中任一，P11 对应小节就是必须确认的项）：
+   - 硬件：`*.svd`、`*.dts`/`*.dtsi`、`*.ld`/`*.icf` 链接脚本、`platformio.ini`、`Kconfig`、CMake toolchain 文件、`*.ioc`、`*.v`/`*.sv`/`*.vhd`、文件名含 datasheet / reference manual / 寄存器 / pinout 的文档、`openocd`/`jlink`/`pyocd` 配置
+   - 算法：`golden`/`reference`/`testdata`/`fixtures` 目录中的 `.npy`/`.mat`/`.csv`/`.bin`、`benchmarks/`、MATLAB/Jupyter 原型、文件名含 spec / 规范 / 标准号的文档
+   - 闭源 API：`openapi*.y*ml`/`swagger*`、`*.proto`、`*.wsdl`、`*.thrift`、`vendor/`/`third_party/`/`sdk/` 下的私有 SDK、依赖清单中不在公共包仓库的包、私有包源配置
 2. 按 `templates/project_profile.template.md` 写初稿（status=DRAFT），每个事实注明出处；推断不出的写"未知"。不得写入任何凭据值。
-3. 向用户展示摘要并逐项确认**关键未知项**：工作区布局、测试命令、环境与部署方式、禁用项、谁执行 commit/push。
+3. 向用户展示摘要并逐项确认**关键未知项**：工作区布局、测试命令、环境与部署方式、禁用项、谁执行 commit/push；有 P11 信号时还有：资料的位置（不在仓库就请用户放进来或写"无文档"）、硬件测试能力（sim / hil / manual 及 hil 能否由子代理执行）、数值验收指标与容限、闭源 API 的测试替身。P11 的内容只写扫描到的路径和用户确认的事实，不凭模型知识概括资料内容。
 4. 用户确认后改为 APPROVED 再开始流程。写 `.claude/` 失败时，写到 `project_workspace/project_profile.draft.md` 并请用户移动。
 5. 无人值守时：画像缺失 → 只生成初稿并停止，不启动流程。子代理模式：生成初稿后把关键未知项写成检查点问题并结束；下次调用带回确认结果时，按答复更新画像、改为 APPROVED，在 clarifications 中记答复人"用户（经主会话转述）"，再启动流程。
+
+**旧画像没有 P11**（v3.6 及以前生成的）：按"无"处理。但本次需求或仓库里出现 P11 信号时，先按上面的扫描规则拟出 P11 补充稿，请用户确认后写入画像（画像 MINOR 版本 +1），再启动流程。
 
 画像在流程中途被修改 → 读取新版，在 phase_status 记录 `<profile version>` 变化，评估对已批准产物的影响并告知用户。
 
@@ -149,11 +155,13 @@ memory: project
 3. 按 §F 决策规则得出结论；FAIL 时把每条 NOT_SATISFIED 转为可执行的修正指令。
 
 **各组要点：**
-- **A**：抽查 3 条需求的来源引用确实存在于用户原文或所引代码位置；核对 INFERRED 占比 ≤ 画像上限。
+- **A**：抽查 3 条需求的来源引用确实存在于用户原文或所引代码位置；核对 INFERRED 占比 ≤ 画像上限。P11-2 有数值指标时，核对涉及的 AC 写了阈值且与画像一致。
 - **B**：用 `git grep -n` / `ls` 核实引用的现有模块/文件存在；检查画像 P8 禁用技术未出现；ADR 都有 Status。
+  - P11 不为"无"时，核对 module_design 的"领域与外部依赖出处"表（协议 §N-1）：`[P11:]`/`[CODE:]` 出处不超过 10 条就全部打开原文核对，超过 10 条就抽查 10 条（优先抽接口签名、寄存器地址、错误码）。出处不存在或内容对不上 → FAIL；影响接口契约的事实标 `[UNSOURCED]` 却没有返回 CLARIFICATION_NEEDED → FAIL。
 - **C**：
   - `git status --short` 与 `git diff --stat` 核对改动文件与 implementation_plan 一致，无无关改动（greenfield 则核对代码目录）；
   - 迁移符合画像 P6；
+  - P11 不为"无"时：用 `git diff` 找出新增的 API 调用（端点、方法名、字段）和硬件访问（寄存器名、地址常量），逐个在 module_design 的出处表里查；查不到的 → FAIL（协议 §N-2）；
   - 按画像 P4 运行与改动相关的测试，把计数行与结论行写进 `<verification>`；
   - 核对 code_review_report 的评分与 finding 统计算术一致，MAJOR 遗留 >3 条时有逐条原因；评分低于 6 的维度都有对应 finding；
   - 缺陷修复轮次：被替换的旧版本产物在 artifacts 中登记为 SUPERSEDED。
@@ -163,6 +171,7 @@ memory: project
   - 按 `<quality_thresholds>` 的模式核对每层判定和 critical path 覆盖率；
   - 失败项逐一与基线比对，区分既有与新增；
   - 确认 PASS 用例都有执行输出。
+  - P11 不为"无"时：P11-2 每个数值指标都有对应用例，断言的容限与画像一致，期望值来自 golden data 或参考实现；hil 用例只在画像允许时执行；没有调用真实闭源 API；manual 用例都在人工验证清单里。
   - 复跑范围：缺省跑画像 P4 的全量回归。只有同时满足以下条件才可只跑相关模块：全量预计 > 15 分钟；改动不涉及共享代码（模型、路由、配置、中间件、公共库、依赖清单）；相关模块由 `git diff --name-only` 推导。降级时把判据、实际范围和未覆盖部分写进 `<verification>`，并在交付报告"遗留问题"中注明全量回归未在本地执行。
 - **E1**：每个 DEPLOY 有 ROLLBACK；预检完整；环境与策略只用画像 P7 中存在的；无画像 P8 禁用操作；回滚不破坏目标机本地状态；远端命令中的本地变量引用方式正确。
 - **E2**：核对 deployment_report 每步都有实际输出；亲自执行（或请用户执行）部署后验证中的只读检查项。
@@ -223,7 +232,8 @@ memory: project
   | 全量回归新增失败 | | 0 | |
 - **交付物清单**：| 文件 | 生成代理 | 最终版本 | 状态 |；代码改动 `git status --short`（待用户确认后提交）
 - **遗留问题**：| 问题 | 来源 | 级别 | 建议 |；含 OVERRIDDEN 记录与 PM 代答待确认的澄清项
+- **待人工验证**（有 manual 用例或测试替身为"无"的 API 时）：引用测试报告中的人工验证清单，写明 critical path 中有几条待人工验证
 - **开放 conditions**：所有未关闭的 PASS_WITH_CONDITIONS 条件
 - **部署**：E1 计划位置；E2 是否执行、目标环境、结果
 - **安全事件摘要**（如有）
-- 最终状态定义：DELIVERED = 全部通过且指标达标；DELIVERED_WITH_ISSUES = 完成但有遗留/条件项/覆盖；INCOMPLETE = 部分阶段未完成。
+- 最终状态定义：DELIVERED = 全部通过且指标达标；DELIVERED_WITH_ISSUES = 完成但有遗留/条件项/覆盖/待人工验证；INCOMPLETE = 部分阶段未完成。

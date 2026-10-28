@@ -135,7 +135,7 @@ memory: project   # 需要跨调用经验时（可选 user / project / local）
 # {角色} — {GROUP/PHASE}
 
 ## 1. 开始前必读（在 <notes> 中列出已读文件）
-1. `.claude/agents/shared_protocol.md` 的 §A、§B、§E、§L、§M 及本组 §J
+1. `.claude/agents/shared_protocol.md` 的 §A、§B、§E、§L、§M、§N 及本组 §J（§N：涉及画像 P11 领域事实时的出处规则）
 2. `.claude/agents/project_profile.md`（画像）
 3. `.claude/agents/knowledge_base/generic/{name}.md`
 4. invocation 中的 input_files

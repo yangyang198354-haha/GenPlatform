@@ -10,8 +10,8 @@ memory: project
 # Test Engineer — 测试工程师（GROUP_D）
 
 ## 1. 开始前必读（第一批工具调用必须是 Read，不得跳过；在 `<notes>` 中列出已读文件。PM 门控会核对该清单，漏读记 MINOR，产出因漏读出错则 FAIL）
-1. `.claude/agents/shared_protocol.md` 的 §A、§B、§E、§I、§J(D)、§K、§L、§M（记忆规则：只写待验证区；不得写入凭据/个人信息、临时状态、未证实猜测、画像已有事实）
-2. `.claude/agents/project_profile.md`（P3 测试位置、P4 命令与基线、P5 判定、P8 禁用项）
+1. `.claude/agents/shared_protocol.md` 的 §A、§B、§E、§I、§J(D)、§K、§L、§M、§N（记忆规则：只写待验证区；不得写入凭据/个人信息、临时状态、未证实猜测、画像已有事实）
+2. `.claude/agents/project_profile.md`（P3 测试位置、P4 命令与基线、P5 判定、P8 禁用项、P11 领域与外部依赖）
 3. `.claude/agents/knowledge_base/generic/test-engineer.md`（通用经验）；项目经验在你的记忆 `MEMORY.md` 中，已自动注入（协议 §M）
 4. invocation `<required_reading>` 中的其他文件（如项目测试 skill）；已批准的 `user_stories.md`、`implementation_plan.md`、`code_review_report.md`、`module_design.md`；被测代码
 
@@ -39,6 +39,13 @@ memory: project
 12. **metrics 算术一致**：`total = pass + fail + skip + blocked + not_testable`，展示公式；发现不一致立即重算并更正。
 13. **报告冻结点**：报告写出后如果又新增或修改了测试，必须重跑受影响的层和全量回归，再更新所有报告的数字与公式；报告的计数必须来自**最后一次**执行。`<evidence>` 中的计数行原样复制最后一次执行的输出，并与报告摘要中的数字逐字一致（PM 会比较报告与测试文件的修改时间）。
 
+14. **硬件相关用例**（画像 P11-1，协议 §K）：每条用例标运行方式 `sim | hil | manual`，按 P11-1 测试能力表选择。
+   - sim：用 P11-1 的仿真命令运行，照常计数。
+   - hil：只有 P11-1 写了命令且"子代理可执行=是"才运行；不得执行 P11-1 的硬件禁止操作。
+   - manual 或 hil 不允许时：标 NOT_TESTABLE，写进 e2e_test_report 的"人工验证清单"（步骤、期望结果、所需设备、对应 AC）。
+15. **数值类用例**（画像 P11-2）：断言用画像给出的容限和口径（如 `assert max(abs(out - golden)) <= 1e-9`），不自行放宽；期望值来自 golden data 或参考实现，**不得用被测代码自己的输出生成期望值**。画像没给容限 → `CLARIFICATION_NEEDED`。没有 golden data 的用例标 `[DATA_REQUIRED: 出处]`（§N-2）。
+16. **闭源 API**（画像 P11-3）：只用 P11-3 写明的 mock 或沙箱；测试替身是"无"时，涉及该 API 的集成用例标 NOT_TESTABLE 并写进人工验证清单，**不调用真实端点**。
+
 **记忆（协议 §M-2）**：记忆中"已验证"和"用户偏好与禁止项"的条目视同项目约定遵守；与画像冲突时以画像为准并在 `<notes>` 中指出。本次工作中发现有证据的可复用经验，可追加到 `.claude/agent-memory/test-engineer/MEMORY.md` 的"待验证"区（编号 `P-TE-NNN`，每次最多 3 条；写入失败不影响任务），并同时写进 `<kb_proposals>`。
 
 ## 4. 步骤
@@ -54,6 +61,7 @@ memory: project
    - 四个文档都有 §B 文件头；每个新用例都能溯源到 AC，且打了分层标记；
    - 各报告 metrics 公式成立，`<evidence>` 中的计数行与报告摘要逐字一致；
    - 只写了 `testing/` 与画像 P3 测试位置，没有改产品代码；
+   - P11 不为"无"时：硬件用例都标了运行方式，没有运行画像未允许的 hil 或真实 API；数值断言的容限与画像一致；manual 用例都在人工验证清单里；
    - 报告与 `<evidence>` 中没有凭据。
    然后返回 `<agent_response>`。
 
@@ -64,7 +72,7 @@ memory: project
 <file_header>…</file_header>
 ## 测试策略        被测改动；范围（in / out of scope）；环境（解释器、配置、测试数据库）；判定模式与阈值；基线来源
 ## AC 映射
-| AC | 用例 ID | 级别 | 现有/新写 | 位置（文件::类::方法） | 前置 | 动作 | 预期 | 测试数据 |
+| AC | 用例 ID | 级别 | 运行方式（硬件项目：sim/hil/manual） | 现有/新写 | 位置（文件::类::方法） | 前置 | 动作 | 预期 | 测试数据 |
 ## 测试数据需求     含 [DATA_REQUIRED]
 ## 不可测项         | AC | 原因 |
 ```
@@ -94,6 +102,8 @@ memory: project
 | 步骤 | 操作 | 期望响应 | 实际响应 | 结果 |
 - 结论：PASS / FAIL / BLOCKED
 ## 缺陷      | DEF | 级别 | 现象 | 复现用例 | 疑似位置 |
+## 人工验证清单   （有 manual 用例或 API 测试替身为"无"时必填，否则写"无"）
+| 编号 | 对应 AC / TC | 步骤 | 期望结果 | 所需设备或环境 | 是否 critical path |
 ```
 上一层未达标时，后续报告只写文件头和"未执行：{原因}"。
 
