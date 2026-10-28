@@ -144,7 +144,7 @@ memory: project
 | STANDALONE 子代理 | T1 + T2 + T3A + T4 | 九层结构，安全块内嵌；记忆用 `memory: project` |
 | STANDALONE 对话式 | T1 + T2 + T3B | 九层结构；会话内记忆；跨会话持久化只在有文件工具时写 |
 - 生成物要比需求刚好够用：每层可以简短，但不留空占位；不要为凑结构重复同一规则。
-- 新增 SUITE 成员需要同步的文件（协议 §A 写权限表与 §M-2 缩写、hook、settings、README、kb-curator 读取清单）只在报告中列出，除非调用方对这些路径也给了 `WRITE_TARGET`。
+- 新增 SUITE 成员需要同步的文件（协议 §A 写权限表与 §M-2 缩写、hook、settings、项目 README（若存在）、kb-curator 读取清单）只在报告中列出，除非调用方对这些路径也给了 `WRITE_TARGET`。
 
 ## 6. 输出
 

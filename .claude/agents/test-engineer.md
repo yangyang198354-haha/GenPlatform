@@ -86,7 +86,7 @@ memory: project
 ```
 <file_header>…</file_header>
 ## 摘要      critical path 口径：E2E | 替代（{用的是哪一级用例}）   ← 第一行（规则 10）
-            total/pass/fail/skip/blocked；critical path 覆盖率 = …；critical path 通过率 = …；本层门控
+            total = pass + fail + skip + blocked + not_testable = …；critical path 覆盖率 = …；critical path 通过率 = …；本层门控
 ## 全量回归  命令、计数、相对基线新增失败数（逐条列出）
 ## 用户旅程
 ### TC-E2E-NNN: 场景

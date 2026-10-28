@@ -145,4 +145,4 @@ memory: project   # 需要跨调用经验时（可选 user / project / local）
 ## 4. 输出格式        文件路径、文件头（§B）、章节结构；最后返回 §E 的 <agent_response>
 ## 5. 自检清单        返回前逐条确认，未通过的写进 <notes>
 ```
-新增套件成员时还要同步：shared_protocol §A 写权限表、§M-2 缩写、kb-curator 的记忆读取清单、两个 hook 的 SDLC 集合与 settings 的 SubagentStop matcher、README 组成表。
+新增套件成员时还要同步：shared_protocol §A 写权限表、§M-2 缩写、kb-curator 的记忆读取清单、两个 hook 的 SDLC 集合与 settings 的 SubagentStop matcher、项目 README（若存在）。

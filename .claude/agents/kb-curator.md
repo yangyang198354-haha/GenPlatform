@@ -27,7 +27,7 @@ memory: project
 ## 3. 步骤
 0. **校验输入**：
    - 收件箱逐行解析 JSON；解析失败、缺 `id`、`id` 重复的行不处理，在报告"淘汰"区写明行号与原因。日志的状态列只认 `committed` / `pending`，其他值按未处理对待并在报告中注明。
-   - 收件箱与 phase_status 都不存在或为空，且各记忆"待验证"区也为空 → 无事可做：写一份摘要全为 0 的报告，返回 SUCCESS。
+   - 收件箱与 phase_status 都不存在或为空，且各记忆"待验证"区也为空，且 `pending_patch.md` 不存在或已 `APPLIED →` → 无事可做：写一份摘要全为 0 的报告，返回 SUCCESS。
    - invocation 中 `GENERIC_KB_CONFIRMED` 列出的 ID 在候选中找不到或有歧义 → 只处理能确定的条目；全部无法确定时返回 `CLARIFICATION_NEEDED`：在 `<questions>` 中写编号问题（`priority=CRITICAL|NORMAL`）并给出可选项，随即结束，不等待回复（协议 §E-1 末段）。
 0b. **应用上次的补丁**（`pending_patch.md` 存在且不是 `APPLIED →` 行时）：逐项写入对应记忆文件并 Read 回读；成功的条目在日志追加 `committed`，失败的保持 `pending`（重试上限见步骤 8.5）；全部成功后按步骤 8.4 收尾。
 1. **收集候选**：收件箱中在日志里没有 `committed` 行的条目（按 `id` 判断；`pending` 行视为未处理，重新处理）；各记忆"待验证"区；本项目门控 FAIL/条件项与缺陷（一个反复出现的 finding 本身就是经验来源）；PM 记忆中的用户偏好。

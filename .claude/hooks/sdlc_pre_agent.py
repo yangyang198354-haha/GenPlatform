@@ -11,8 +11,8 @@ import json
 import os
 import sys
 
-SDLC = {"requirement-analyst", "system-architect", "software-developer",
-        "test-engineer", "devops-engineer", "kb-curator",
+SDLC = {"pm-orchestrator", "requirement-analyst", "system-architect",
+        "software-developer", "test-engineer", "devops-engineer", "kb-curator",
         "agent-builder"}
 
 
@@ -31,7 +31,8 @@ def main():
         "permissionDecision": "deny",
         "permissionDecisionReason":
             f"当前目录 {cwd} 不是仓库根。子代理的项目记忆按当前目录定位，"
-            f"请先在 Bash 中执行 cd '{root}'，再重新调用该子代理（pm-orchestrator 规则 13）。",
+            f"请先在 Bash 中执行 cd '{root}'，再重新调用该子代理（pm-orchestrator 规则 13）。"
+            f"若当前不在本仓库内工作，请到仓库根目录启动会话后再调用。",
     }}, ensure_ascii=False))
     return 0
 

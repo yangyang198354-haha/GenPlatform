@@ -86,9 +86,14 @@ memory: project
 ## 自验证结果     实际命令 + 输出尾部（计数行与结论行）；未验证项及原因
 ## 按模块评审
 ### MOD-NNN
+**五维评分表**
 | Correctness | Security | Performance | Maintainability | Testability |
-| x/10 | … |
+|---|---|---|---|---|
+| x/10 | x/10 | x/10 | x/10 | x/10 |
+
+**CR 问题表**
 | CR | 级别 | 位置 | 描述 | 状态 |
+|---|---|---|---|---|
 ## 未解决的 CRITICAL   （[UNRESOLVED-CRITICAL] 说明，或"无"）
 ## 遗留 MAJOR          （超过 3 条时逐条原因）
 ## 缺陷修复            （缺陷修复模式）| DEF | 位置 | 根因 | 修改说明 |

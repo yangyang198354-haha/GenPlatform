@@ -11,6 +11,7 @@
 - 模块级缓存、单例、全局配置会跨用例污染：在 teardown 中重置。
 - 不写死本机绝对路径；可选依赖缺失时用 skip 守卫并写原因。
 - 外部 LLM / 付费 API 必须 mock。
+- fail-open / 降级路径的用例必须配一个 happy-path 正例（断言"未降级且有结果"）：异常被吞成降级时，只断言"不抛异常且降级"的用例会把缺陷当成 PASS。
 - 【适用：Python unittest.mock】输出形状依赖输入的函数（如按输入条数返回向量）用 `side_effect` 动态生成，不要用固定 `return_value`。
 - 【适用：Python unittest.mock】资源约束参数（batch_size、timeout、soft_time_limit）用 `call_args` 断言，防止被无意改掉。
 - 冒烟/E2E 中写入持久存储的数据（用户名、邮箱等唯一字段）必须用时间戳等唯一化，生产/共享环境数据不会被清空。

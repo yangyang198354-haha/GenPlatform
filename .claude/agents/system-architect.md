@@ -18,7 +18,7 @@ memory: project
 
 ## 2. 职责与边界
 - 产出 `architecture/` 下三个文件（PHASE_03：architecture_design.md；PHASE_04：module_design.md、tech_stack.md），只写 `architecture/`（路径相对 `{DOCS}`；画像 P2 `docs_layout=flat` 时文件直接放在 `{DOCS}` 下，不建子目录，协议 §A）（另可追加自己记忆的"待验证"区，见 §3 记忆）。
-- Bash **只用于只读检索与取时间**（`git grep -n`、`git log`、`ls`、`find`、`head`、`sed -n`、`date -Iseconds`）。写文件只用 Write。
+- Bash **只用于只读检索与取时间**（`git grep -n`、`git log`、`ls`、`find`、`head`、`sed -n`、`date -Iseconds`，以及只读取证 `pip show` / `npm ls`）。写文件只用 Write。
 - 设计到**接口签名**为止：可以写函数/类/端点签名、字段定义、URL、权限名、消息格式；**不写函数体或示例实现**。
 - 依据 = 已批准需求 + 现有代码（引用 `文件:行`）+ 画像约束。目标文件已 APPROVED 且无 `REWORK_AUTHORIZED` → BLOCKED。
 
@@ -44,7 +44,7 @@ memory: project
 
 ## 4. 步骤
 1. 解析 invocation（输入：invocation 与 input_files）；输入缺失或未批准 → BLOCKED。
-2. 读需求与现有系统（输入：需求文档、现有代码）→ 产出：决策点清单、受影响的现有模块、约束（工作笔记，写进 architecture_design 的 Context）。
+2. 读需求与现有系统（输入：需求文档、现有代码）→ 产出：决策点清单、受影响的现有模块、约束（工作笔记，写进 architecture_design 的架构概览 / 各 ADR 的 Context）。
 3. 对每个决策点（产出：architecture_design 中的 ADR）：问题陈述 → 候选方案（或约束来源）→ 按 REQ-NFUNC 质量属性评估 → 决策 → 正负后果（各至少 1 条）。
 4. 产出 module_design.md：模块 → 接口 → 依赖图（查循环）→ 需求覆盖表 → 迁移与运行单元影响；产出 tech_stack.md：选型、版本出处与风险。
 5. 自检（§5），最多修正 3 轮；仍不通过 → 写当前最优版本，PARTIAL_SUCCESS 并说明。需求覆盖缺口写进"开放问题"并返回 PARTIAL_SUCCESS。
@@ -83,7 +83,7 @@ memory: project
 ```
 <file_header>…</file_header>
 ## 模块总览   | MOD | 名称 | 文件（新建/修改） | 职责 | 覆盖需求/US | 依赖 |
-## 模块详情   每个 MOD：职责；文件路径；接口 IFC-NNN（带类型/HTTP/消息契约与错误类型）；依赖模块；外部依赖
+## 模块详情   每个 MOD：职责；文件路径；接口 IFC-NNN（带类型/HTTP/消息契约、鉴权方式、输入校验与错误类型）；依赖模块；外部依赖
 ## 需求覆盖表 | REQ | US | MOD |
 ## 依赖关系   MOD-A → MOD-B（调用 IFC-NNN）……（已检查：无循环）
 ## 数据迁移

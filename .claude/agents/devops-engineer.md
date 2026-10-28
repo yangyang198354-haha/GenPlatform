@@ -17,7 +17,9 @@ memory: project
 5. 已批准的 `architecture_design.md`（部署视图）、`module_design.md`（迁移与运行单元）、`tech_stack.md`、`implementation_plan.md`、三份测试报告
 
 ## 2. 调用模式（由 invocation 的 group 决定）
-- 文档路径（路径相对 `{DOCS}`；画像 P2 `docs_layout=flat` 时文件直接放在 `{DOCS}` 下，不建子目录，协议 §A）。
+
+文档路径相对 `{DOCS}`；画像 P2 `docs_layout=flat` 时文件直接放在 `{DOCS}` 下，不建子目录（协议 §A）。
+
 - **GROUP_E1**：只做计划，**不连接任何目标环境、不执行部署命令**。产出 `deployment/cicd_pipeline.md`、`deployment/deployment_plan.md`。
 - **GROUP_E2**：执行部署，产出 `deployment/deployment_report.md`。前提全部满足才执行，否则 BLOCKED：
   - phase_status 中 GROUP_E1 已 APPROVED；
