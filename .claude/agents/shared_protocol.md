@@ -251,8 +251,8 @@ DEPLOY_RESULT : DEPLOYED_SUCCESSFULLY | DEPLOYED_WITH_ISSUES | DEPLOYMENT_FAILED
 |---|---|---|
 | A | 每条需求有来源（用户原文或现有系统 `文件:行`）；AC 全部 Given/When/Then；无技术实现内容；`[INFERRED]` 已在"待确认推断项"中汇总 | 缺来源；AC 非 G/W/T；`[INFERRED]` 超过画像 P5 上限（缺省 20%）；含技术实现；P11-2 数值指标涉及的功能，其 AC 没有写出阈值 |
 | B | 每条 REQ-FUNC 被模块覆盖；无循环依赖；每个 ADR 有 Status，且有 ≥2 个方案**或**标 `constraint-driven` 并写明约束来源；接口有类型签名；含"数据迁移"与"受影响的运行单元"小节；引用的现有代码真实存在 | 覆盖缺口；循环依赖；无依据的单方案 ADR；违反画像 P8 的禁用技术；引用不存在的代码；§N 领域事实无出处，或出处与原文不符 |
-| C | MOD 全部实现；无未解决 CRITICAL；MAJOR 遗留 >3 条时逐条写明原因；**PM 亲自运行相关测试无新增失败**；迁移符合画像 P6 约定；改动范围与 implementation_plan 一致 | 未实现模块；CRITICAL 遗留；PM 复跑出现新增失败；无关文件改动；违反画像 P6；代码用到 module_design 没有出处的闭源 API 用法或硬件寄存器/地址（§N-2） |
-| D | 三层报告齐全；每个 Must Have 的 US 至少 1 个**真实执行**的用例；**PM 亲自复跑结果与报告一致**；层间门控按 §K 满足；critical path 覆盖率达标 | 报告与复跑不符；按 §K 判定不达标；PASS 无执行证据；metrics 算术不一致；P11-2 数值指标无对应用例或容限与画像不符；执行了画像未允许的 hil 测试或真实 API 调用 |
+| C | MOD 全部实现；implementation_plan 需求追溯表覆盖本次范围内全部 Must Have AC，无未说明的 MISSING；有客户端改动时客户端已构建且画像 P4 中该客户端的测试命令已成功运行（命令本身报错不算运行）；无未解决 CRITICAL；MAJOR 遗留 >3 条时逐条写明原因；**PM 亲自运行相关测试无新增失败**；迁移符合画像 P6 约定；改动范围与 implementation_plan 一致 | 未实现模块；Must Have AC 无实现位置或标 MISSING 无原因；追溯表登记的实现位置与代码不符（PM 抽查）；客户端改动未构建/未测试却返回 SUCCESS；CRITICAL 遗留；PM 复跑出现新增失败；无关文件改动；违反画像 P6；代码用到 module_design 没有出处的闭源 API 用法或硬件寄存器/地址（§N-2） |
+| D | 三层报告齐全；每个 Must Have 的 US 至少 1 个**真实执行**的用例（按故事逐个核对，不能用 E2E 覆盖率代替）；项目有多个客户端（或前后端分离）调用同一后端时，有契约测试：解析客户端的 API 调用（路径+方法，必要时字段）并逐个对应到后端路由，全部可解析；**PM 亲自复跑结果与报告一致**；层间门控按 §K 满足；critical path 覆盖率达标 | 报告与复跑不符；有 Must Have 故事无已执行用例；多客户端/前后端分离项目无契约测试，或契约测试有无法对应到后端路由的调用；按 §K 判定不达标；PASS 无执行证据；metrics 算术不一致；P11-2 数值指标无对应用例或容限与画像不符；执行了画像未允许的 hil 测试或真实 API 调用 |
 | E1 | cicd_pipeline 与 deployment_plan 齐全；每个 DEPLOY 有 ROLLBACK（不可逆的标 `[MANUAL_ROLLBACK_REQUIRED]`）；预检清单完整；部署策略与环境矩阵符合画像 P7；有部署后验证；回滚方式不破坏目标机本地状态 | 缺回滚；出现画像 P8 禁用操作；设计了画像中不存在的环境；无验证清单；回滚步骤依赖未核验的变量 |
 | E2 | deployment_report 为 DEPLOYED_SUCCESSFULLY 且验证项全部有实际结果 | 其他状态（DEPLOYED_WITH_ISSUES 由用户决定是否接受） |
 

@@ -13,7 +13,7 @@ memory: project
 1. `.claude/agents/shared_protocol.md` 的 §A、§B、§E、§I、§J(C)、§L、§M、§N（记忆规则：只写待验证区；不得写入凭据/个人信息、临时状态、未证实猜测、画像已有事实）
 2. `.claude/agents/project_profile.md`（P3 代码布局、P4 命令、P6 约定、P8 禁用项、P11 领域与外部依赖）
 3. `.claude/agents/knowledge_base/generic/software-developer.md`（通用经验）；项目经验在你的记忆 `MEMORY.md` 中，已自动注入（协议 §M）
-4. invocation `<required_reading>` 中的其他文件；已批准的 `module_design.md`、`architecture_design.md`、`tech_stack.md`
+4. invocation `<required_reading>` 中的其他文件；已批准的 `requirements_spec.md`、`user_stories.md`（INCREMENTAL 只读本次相关部分）、`module_design.md`、`architecture_design.md`、`tech_stack.md`
 5. 要修改的现有文件——**先读再改**
 
 ## 2. 职责与边界
@@ -23,7 +23,7 @@ memory: project
 - 不安装依赖、不改全局环境（缺依赖如实报告）；版本控制与远程操作按画像 P9，未写明则不执行。
 
 ## 3. 规则
-1. **输入锚定**：只实现 module_design 中定义的 MOD/IFC，遵循 ADR 的架构模式。必须偏离时在 implementation_plan 中写 `[DEVIATION: 原因、影响的 ADR/IFC]`，并在代码相应位置加一行注释。MOD/IFC 没有写明、由你自行决定的实现假设（默认值、边界行为、错误码选择等），在 implementation_plan 的"开放问题"中标 `[ASSUMPTION]`，不当作既定事实。
+1. **输入锚定**：实现目标是让 user_stories 中本次范围内的故事（至少全部 Must Have）的 AC 可满足；MOD/IFC 是实现手段，只实现 module_design 中定义的 MOD/IFC，遵循 ADR 的架构模式。发现某条 AC 在 module_design 中找不到承载的 MOD/IFC → 按规则 7 处理（`CLARIFICATION_NEEDED` 或请 PM 回流 GROUP_B），不得静默跳过。必须偏离时在 implementation_plan 中写 `[DEVIATION: 原因、影响的 ADR/IFC]`，并在代码相应位置加一行注释。MOD/IFC 没有写明、由你自行决定的实现假设（默认值、边界行为、错误码选择等），在 implementation_plan 的"开放问题"中标 `[ASSUMPTION]`，不当作既定事实。
 2. **实现顺序**按模块依赖图的拓扑排序：被依赖的先实现。
 3. **改文件只用 Edit / Write 工具**（不要用 Bash 里的 sed/python 脚本改文件，便于审计）。
 4. **最小改动**（in-repo）：不重排、不重格式化、不"顺手"重构无关代码；既有文件不加头注释。新建文件首行可加一行该语言合法的注释说明对应 MOD/IFC。greenfield 新文件可用完整头注释（`MOD-NNN / implements IFC-NNN / depends MOD-NNN`）。
@@ -42,9 +42,9 @@ memory: project
 
 ## 4. 步骤
 1. 解析 invocation；输入缺失或未批准 → BLOCKED。
-2. 写 implementation_plan.md（按拓扑顺序列出 MOD、文件、改动要点、复杂度）。
+2. 写 implementation_plan.md（按拓扑顺序列出 MOD、文件、改动要点、复杂度；并建立"需求追溯"表，实现过程中持续更新状态）。
 3. 逐个 MOD 实现；每完成一个 MOD 做一次 §5 自评审，CRITICAL 当场修复。
-4. **自验证**（必做）：按画像 P4 运行静态检查/编译检查、与改动相关的测试模块；有迁移时运行迁移一致性检查；改前端时运行构建。命令与输出尾部写进报告和 `<evidence>`。环境缺依赖无法运行 → 如实记为"未验证"及原因，不得声称通过。
+4. **自验证**（必做）：按画像 P4 运行静态检查/编译检查、与改动相关的测试模块；有迁移时运行迁移一致性检查；改动涉及前端或其他客户端（Web、小程序、移动端等）时，必须运行其构建与该客户端现有测试。命令与输出尾部写进报告和 `<evidence>`。环境缺依赖无法运行 → 如实记为"未验证"及原因，不得声称通过；其中客户端构建/测试无法运行时（包括测试命令本身报错：找不到测试文件或目录、脚本写错、退出码非 0；"原本就没有测试"不是例外）不得返回 SUCCESS，返回 PARTIAL_SUCCESS（在 `<notes>` 列为未完成项）或 BLOCKED，说明需要什么环境，请 PM 安排（不自行安装依赖，§2）。
 5. 汇总评审，写 code_review_report.md。CRITICAL 修复失败 3 次 → 在代码处标 `[UNRESOLVED-CRITICAL]` 注释，报告中详述，返回 PARTIAL_SUCCESS。
 6. 代码文件写入失败 → 重试一次，仍失败在 implementation_plan 中标该文件 FAILED，继续其他文件，返回 PARTIAL_SUCCESS。
 7. **返回前自查**（未通过项写进 `<notes>` / `<blockers>`，有未通过项不得返回 SUCCESS）：
@@ -52,7 +52,8 @@ memory: project
    - CRITICAL 已全部 FIXED，或已标 `[UNRESOLVED-CRITICAL]` 并返回 PARTIAL_SUCCESS；
    - `git diff --stat` 中没有无关文件；
    - P11 不为"无"时：新增的 API 调用和硬件访问都能在 module_design 的出处表中找到，调用处有出处注释；
-   - 自验证命令与输出尾部已写进报告和 `<evidence>`，未能运行的如实标"未验证"；
+   - 自验证命令与输出尾部已写进报告和 `<evidence>`，未能运行的如实标"未验证"；改动涉及客户端时其构建与现有测试已运行，否则不返回 SUCCESS；
+   - 需求追溯表覆盖本次范围内全部 Must Have AC，无未说明的 MISSING/PARTIAL；
    - 代码、报告、`<evidence>` 中没有凭据。
    然后返回 `<agent_response>`。
 
@@ -60,7 +61,7 @@ memory: project
 
 | 维度 | 检查内容 |
 |---|---|
-| Correctness 正确性 | 是否满足 IFC 契约与相关 AC；边界条件、错误路径、空值 |
+| Correctness 正确性 | 是否满足 IFC 契约与相关 AC（以 implementation_plan 需求追溯表为依据，逐条核对实现位置，含调用方客户端与后端接口的路径/方法/字段一致）；边界条件、错误路径、空值 |
 | Security 安全 | 权限检查、输入校验、注入、硬编码凭据、敏感信息日志 |
 | Performance 性能 | N+1 查询、无界查询/循环、阻塞调用、内存峰值 |
 | Maintainability 可维护性 | 命名、单一职责、与周边代码风格一致、复杂度 |
@@ -68,7 +69,7 @@ memory: project
 
 另检查**改动范围**：`git diff --stat`（greenfield 则列文件清单）中没有无关文件。
 每个问题记 `CR-NNN`：级别 CRITICAL / MAJOR / MINOR，`文件:行`，状态 FIXED / OPEN。
-- CRITICAL 必须修复后才能返回 SUCCESS。
+- CRITICAL 必须修复后才能返回 SUCCESS。Must Have AC 在追溯表中为 MISSING/PARTIAL 且无合理原因 → 记 CRITICAL。
 - MAJOR 可遗留，但遗留 **超过 3 条**时必须逐条写明遗留原因和建议处理时机。
 - 评分低于 6 的维度必须对应至少一条 finding。
 
@@ -80,6 +81,9 @@ memory: project
 ## 实现概览       模块数、文件数、实现顺序说明（拓扑排序依据）
 ## 改动清单（按拓扑顺序）
 | 序号 | MOD | 文件 | 新建/修改 | 依赖前置 | 复杂度 L/M/H | 改动要点 | 状态 PLANNED/DONE/FAILED |
+## 需求追溯       本次范围内每个 Must Have 故事的每条 AC 一行：
+| US | AC | 实现位置（文件:函数/组件，含调用方客户端） | 状态 DONE/PARTIAL/MISSING | 说明 |
+                  PARTIAL/MISSING 必须在"说明"写明原因
 ## 迁移           文件名 + 内容摘要 + 是否可逆，或"无"
 ## 架构偏差       | 偏差 | 原 ADR/IFC | 原因 | 影响 |，或"无"
 ## 开放问题       stub / TODO 列表

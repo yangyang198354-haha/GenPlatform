@@ -1,0 +1,76 @@
+{
+  "hooks": {
+    "SubagentStop": [
+      {
+        "matcher": "pm-orchestrator|requirement-analyst|system-architect|software-developer|test-engineer|devops-engineer|kb-curator|agent-builder",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/sdlc_subagent_stop.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/sdlc_pre_agent.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "WebFetch|WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/sdlc_webfetch_guard.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "ask": [
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(rsync *)",
+      "Bash(pscp *)",
+      "Bash(plink *)",
+      "Bash(git push *)",
+      "Bash(pip install *)",
+      "Bash(pip3 install *)",
+      "Bash(python -m pip install *)",
+      "Bash(python3 -m pip install *)",
+      "Bash(uv pip install *)",
+      "Bash(poetry add *)",
+      "Bash(npm install)",
+      "Bash(npm install *)",
+      "Bash(npm i *)",
+      "Bash(npm ci)",
+      "Bash(npm ci *)",
+      "Bash(yarn add *)",
+      "Bash(pnpm add *)",
+      "Bash(pnpm install*)",
+      "Bash(uv add *)",
+      "Bash(uv sync)",
+      "Bash(uv sync *)",
+      "Bash(poetry install)",
+      "Bash(poetry install *)",
+      "Bash(yarn install)",
+      "Bash(yarn install *)",
+      "Bash(yarn)",
+      "Bash(pnpm i)",
+      "Bash(pnpm i *)",
+      "Bash(pnpm install)",
+      "Bash(npm i)",
+      "Bash(pipenv install *)",
+      "Bash(conda install *)"
+    ]
+  }
+}
